@@ -45,7 +45,7 @@ public:
     
     static Vect rnd(int size) { // norm random
         Vect v(size);
-        return v.apply([](T x){ return (T)rand()/(T)RAND_MAX; });
+        return v.apply([]() -> T{ return (T)rand()/(T)RAND_MAX; });
     }
     static Vect seq(size_t size) { // 0,1...n-1
         Vect v(size);
@@ -101,10 +101,10 @@ public:
         return sub(size-n, size);
     }
     void random() {
-        apply([](T x){return (T)rand();});
+        apply([]() -> T {return (T)rand();});
     }
     void rand01() {
-        apply([](float x){ return (T)rand()/(T)RAND_MAX; });
+        apply([]() -> T { return (T)rand()/(T)RAND_MAX; });
     }
     T sum() {
         T s=0;
@@ -175,11 +175,15 @@ public:
     }
     
     // apply labda func, i.e: v2.apply(sinf).sort().apply([](float x){ return x*x; });
-    Vect apply(std::function<T(T)> const& lambda) { // usage: v.apply(sinf)
+    Vect apply(std::function<T(T)> const& lambda) { // usage: v.apply(sin)
         for (auto &d:*this) d=lambda(d);
         return *this;
     }
-    Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda expr.
+    Vect apply(std::function<T()> const& lambda) { // usage: v.apply(funcNoArgs)
+        for (auto &d:*this) d=lambda();
+        return *this;
+    }
+    Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda conditional expr.
         Vect res;
         for (auto const d:*this) if (lambda(d)) res<<d;
         return res;
@@ -187,6 +191,7 @@ public:
     
     T*begin() { _index=0; return data; }
     T*end() { return data+size; }
+    size_t incIndex() { return _index++; } // for (auto d:vect) v1[vect.incIndex()]=d;
     
     // append, void return as Vect return -> very bad performnce
     // so v0 << v1 << v2 is v0<<v1; v0<<v2;
@@ -241,6 +246,10 @@ public:
     inline const T& operator[](size_t index) const {
         assert(!(index<0 || index>=size) && "Vect: index error");
         return data[index];
+    };
+    inline const T& operator[](const Vect&v) const { // vect[v] is vect[v._index]
+        assert(!(v._index<0 || v._index>=size) && "Vect: index error");
+        return data[v._index];
     };
     
     // boolean,
@@ -391,8 +400,7 @@ public:
         return *this;
     }
     
-    // ++, -- Vect, prefix only,
-    // postfix: Vect &operator++(int) not implemented->bad performance
+    // ++, -- Vect, prefix ++v
     Vect &operator++() {
         for (auto &d:*this) d++;
         return *this;
@@ -400,6 +408,10 @@ public:
     Vect &operator--() {
         for (auto &d:*this) d--;
         return *this;
+    }
+    // postfix: Vect &operator++(int) implements _index++ -> v++
+    size_t operator++(int) {
+        return _index++;
     }
 };
 
