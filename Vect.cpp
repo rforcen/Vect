@@ -58,10 +58,24 @@ void testVect() {
     assert(!(v1!=v2) && "!= failure");
     assert(!(v1>v2) && "> failure");
     
+    // subvector (from, to)
+    auto vsub = v0.sub(10,20);
+    assert(vsub.length()==10 && "sub failure");
+    
+    // filter
+    auto vf = v0.filter([](float x) -> bool { return x>0.5 && x<0.7; }).sort();
+    for (auto const d:vf) assert((d>0.5 && d<0.7) && "filter failure");
+    
+    vf=0; // set all values to zero & check scalar
+    assert(vf==0 && "== scalar failure");
+    assert(vf!=10 && "== scalar failure");
+    assert(vf>-10 && "> scalar failure");
+    assert(vf<10 && "< scalar failure");
+    
     VF v3(v0); // misc
     auto v6=v3.scale(0,1);
     v6.sequence(0,5);
     
     // lambda apply func / sort
-    v2.apply(sinf).sort().apply([](float x){ return x*x; });
+    v2.apply(sinf).sort().apply([](float x) -> float { return x*x; });
 }

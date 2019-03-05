@@ -71,7 +71,14 @@ public:
     size_t length() {
         return size;
     }
-    
+    Vect sub(size_t from, size_t to) { // subvector from,to
+        assert(!(from>to || from>=size || to>=size) && "sub: from > to or range error");
+        auto sz=to-from;
+        Vect res(sz);
+        for (auto i=from; i<to; i++)
+            res.data[i-from]=data[i];
+        return res;
+    }
     void random() {
         apply([](T x){return (T)rand();});
     }
@@ -128,6 +135,7 @@ public:
         return *this;
     }
     Vect sequence(T from, T to) {
+        assert(!(from>to) && "sequence error: from > to");
         T inc=(T)(to-from)/(T)size;
         for (auto &d:*this) d = inc * (_index++);
         return *this;
@@ -149,6 +157,11 @@ public:
     Vect apply(std::function<T(T)> const& lambda) { // usage: v.apply(sinf)
         for (auto &d:*this) d=lambda(d);
         return *this;
+    }
+    Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda expr.
+        Vect res;
+        for (auto const d:*this) if (lambda(d)) res<<d;
+        return res;
     }
     
     T*begin() { _index=0; return data; }
@@ -192,18 +205,34 @@ public:
         std::copy(&other.data[0], &other.data[0] + size, &data[0]);
         return *this;
     }
+    Vect &operator=(const T c) { // asignment
+        for (auto &d:*this) d=c;
+        return *this;
+    }
+   
     
     // index mutator
-    inline T& operator[](size_t index) { return data[index]; }
+    inline T& operator[](size_t index) {
+        assert(!(index<0 || index>=size) && "Vect: index error");
+        return data[index];
+    }
     // index accessor
-    inline const T& operator[](size_t index) const { return data[index]; };
+    inline const T& operator[](size_t index) const {
+        assert(!(index<0 || index>=size) && "Vect: index error");
+        return data[index];
+    };
     
     // boolean,
-    bool operator==(const Vect &other) {
+    bool operator==(const Vect &other) { // vect==vect
         bool eq = (size==other.size);
         if(eq)
             for (size_t i = 0; i < size; i++)
                 if (data[i] != other.data[i]) { eq=false; break; }
+        return eq;
+    }
+    bool operator==(const T c) { // vect == scalar, true if all ==
+        bool eq=true;
+        for (auto d:*this) if(d!=c) {eq=false; break;}
         return eq;
     }
     bool operator!=(const Vect &other) {
@@ -214,6 +243,21 @@ public:
                 if (data[i] == other.data[i]) { neq=false; break; }
         }
         return neq;
+    }
+    bool operator!=(const T c) { // vect != scalar
+        bool res=true;
+        for (auto d:*this) if(d==c) {res=false; break;}
+        return res;
+    }
+    bool operator > (const T c) { // vect > scalar, all > scalar
+        bool res=true;
+        for (auto d:*this) if(d<=c) {res=false; break;}
+        return res;
+    }
+    bool operator < (const T c) { // vect < scalar, all < scalar
+        bool res=true;
+        for (auto d:*this) if(d>=c) {res=false; break;}
+        return res;
     }
     // compares smallest vectors
     bool operator>(const Vect &other) {
