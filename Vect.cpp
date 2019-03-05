@@ -30,6 +30,8 @@ void testVect() {
     bool incOK=vorg==v0;
     assert(incOK && "inc, dec failure");
     
+    // seq
+    VF vseq=VF::seq(0,10,0.1);
     
     // aritmethic
     v1.random(); v2.random(); v4.random();
@@ -78,4 +80,8 @@ void testVect() {
     
     // lambda apply func / sort
     v2.apply(sinf).sort().apply([](float x) -> float { return x*x; });
+    
+    auto str=v3.toString();
+    
+    
 }

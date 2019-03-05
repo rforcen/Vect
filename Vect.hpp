@@ -12,8 +12,7 @@
 #include <algorithm>
 #include <string>
 #include <functional>
-
-using std::copy;
+#include <sstream>
 
 template <class T>
 class Vect {
@@ -24,7 +23,7 @@ private:
     
     T *data=nullptr;
     size_t size=0;
-    size_t _index=0;
+    size_t _index=0; // used in iterator
     
 public:
     // constructors
@@ -35,7 +34,7 @@ public:
     }
     Vect(const Vect &other) { // Vect v0(v1), v2=v1;
         alloc(other.size);
-        copy(&other.data[0], &other.data[0] + size, &data[0]);
+        std::copy(&other.data[0], &other.data[0] + size, &data[0]);
     }
     Vect(size_t size, T v[]){
         alloc(size);
@@ -46,7 +45,18 @@ public:
     
     static Vect rnd(int size) { // norm random
         Vect v(size);
-        return v.apply([](float x){ return (T)rand()/(T)RAND_MAX; });
+        return v.apply([](T x){ return (T)rand()/(T)RAND_MAX; });
+    }
+    static Vect seq(size_t size) { // 0,1...n-1
+        Vect v(size);
+        for (size_t i=0; i<size; i++) v<<i;
+        return v;
+    }
+    static Vect seq(double from, double to, double inc) {
+        assert((from<to && inc!=0) && "seq paramaters error");
+        Vect v;
+        for (double i=from; i<to; i+=inc) v<<i;
+        return v;
     }
     
 private:
@@ -59,18 +69,23 @@ private:
         }
     }
     void alloc(size_t size) {
-        if ( (data = (T*)calloc(size, sizeof(T))) == nullptr ) size=0;
+        assert(((data = (T*)calloc(size, sizeof(T))) != nullptr ) && "calloc error, memory full?");
         realSize = this->size = size;
     }
     void resize(size_t size) {
-        if ( (data = (T*)realloc(data, size*sizeof(T))) == nullptr ) size=0;
+        assert (((data = (T*)realloc(data, size*sizeof(T))) != nullptr ) && "realloc error, memory full?");
         realSize = this->size = size;
     }
     
 public:
-    size_t length() {
-        return size;
+    std::string toString()  {
+        std::ostringstream oss;
+        for (auto const d:*this) oss << d << ",";
+        return oss.str();
     }
+    size_t length() {   return size;    }
+    size_t count() {    return size;    }
+    
     Vect sub(size_t from, size_t to) { // subvector from,to
         assert(!(from>to || from>=size || to>=size) && "sub: from > to or range error");
         auto sz=to-from;
@@ -78,6 +93,12 @@ public:
         for (auto i=from; i<to; i++)
             res.data[i-from]=data[i];
         return res;
+    }
+    Vect left(size_t n) {
+        return sub(0, n);
+    }
+    Vect right(size_t n) {
+        return sub(size-n, size);
     }
     void random() {
         apply([](T x){return (T)rand();});
