@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <algorithm>
 #include <string>
 #include <functional>
@@ -48,7 +49,7 @@ public:
         return v.apply([]() -> T{ return (T)rand()/(T)RAND_MAX; });
     }
     static Vect seq(size_t size) { // 0,1...n-1
-        Vect v(size);
+        Vect v;
         for (size_t i=0; i<size; i++) v<<i;
         return v;
     }
@@ -56,6 +57,16 @@ public:
         assert((from<to && inc!=0) && "seq paramaters error");
         Vect v;
         for (double i=from; i<to; i+=inc) v<<i;
+        return v;
+    }
+    static Vect genWave(T secs, int sampleRate, int nw, T amp[], T hz[], T phase[]) {
+        Vect v;
+        for (T t=0; t<secs*sampleRate; t++) {
+            double res=0, freq2inc = 2.*M_PI/sampleRate * t;
+            for (int i=0; i<nw; i++)
+                res += amp[i] * sin( hz[i]*freq2inc + phase[i] );
+            v << (T)(res/nw);
+        }
         return v;
     }
     
@@ -160,6 +171,17 @@ public:
         T inc=(T)(to-from)/(T)size;
         for (auto &d:*this) d = inc * (_index++);
         return *this;
+    }
+    Vect reverse() {
+        for (size_t i=0, j=size-1; i<size/2; i++,j--)
+            std::swap<T>(data[i], data[j]);
+        return *this;
+    }
+    T polyEval(T x) {
+        T r=0, ex=1;
+        for (size_t i=0; i<size; i++, ex*=x)
+            r+=data[i] * ex;
+        return r;
     }
     
     Vect sort(bool increasing=true) {

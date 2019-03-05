@@ -37,7 +37,7 @@ void testVect() {
     v0 = (v1+v2/v4)*3;
     
     v0.clear(); // vect append
-
+    
     auto v01=VF::rnd(400), v02=VF::rnd(500);
     v0 << v01;
     v0 << v02;
@@ -48,13 +48,17 @@ void testVect() {
     for (int i=0; i<v1.length(); i++) // index (v2=v1)
         v2[i] = v1[i];
     // logical ops
-    assert((v1==v1)     && "== failure");
-    assert((v1==v2)     && "!= failure");
-    assert(!(v1>v2)     && "> failure");
+    assert(v1==v1     && "== failure");
+    assert(v1==v2     && "!= failure");
+    assert(!(v1>v2)   && ">  failure");
     
     float sum=0;
     for (auto vi:v1) sum+=vi; // iterator
     assert(sum==v1.sum() && "iterator failure");
+    
+    // reverse
+    auto vrev = VF::seq(10), vw=vrev;
+    assert(vrev == vw.reverse().reverse() && "reverse failure");
     
     // subvector (from, to)
     auto vsub = v0.sub(10,20);
@@ -69,6 +73,10 @@ void testVect() {
     assert(vf!=10   && "== scalar failure");
     assert(vf>-10   && "> scalar failure");
     assert(vf<10    && "< scalar failure");
+    
+    // generate complex wave
+    auto vwave = VF::genWave(1, 8000, 3,
+                             new float[3]{1,0.4,0.6}, new float[3]{200, 600, 1800}, new float[3]{0,0,0});
     
     VF v3(v0); // misc
     auto v6=v3.scale(0,1);
