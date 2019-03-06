@@ -318,9 +318,15 @@ public:
         assert(!(v._index<0 || v._index>=size) && "Vect: index error");
         return data[v._index];
     };
-    Vect operator[](VectIndex &ixs) const { // index vect by vector of indexes
+    Vect operator[](VectIndex ixs) const { // index vect by vector of indexes
         Vect v;
         for (auto ix:ixs) v << data[ix];
+        return v;
+    }
+    Vect operator[](std::function<bool(T)> const& lambda) { // index vect by vector of indexes
+        Vect v;
+        for (auto d : *this)
+            if (lambda(d)) v << d;
         return v;
     }
     

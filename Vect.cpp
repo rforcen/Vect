@@ -67,21 +67,25 @@ void testVect() {
     assert(vseq.sum() - ( vs0.sum()-vs0.count() ) < 1e-15);
     cout << "ok, error=" << vseq.sum() - ( vs0.sum()-vs0.count() )  << "\n";
     
-    // locateIndex
+    // filterIndex, v[lambda]
     cout << "testing filterIndex, [by VectIndex]...";
     for (int i=0; i<100; i++)  {
         int n=10000;
-        auto fsel = [](double x) -> bool { return x>0.25 && x<0.86; };
+        auto fsel = [](double x) -> bool { return x>0.25 && x<0.85; };
         VF v=VF::rnd(n);
         
-        auto ixs = v.filterIndex(fsel);
+        auto ixs = v.filterIndex(fsel); // v[fsel]
         
         assert(ixs.count() == v.filter(fsel).count());
+        assert(v[ixs]==v.filter(fsel));
         
         for (auto ix:ixs)
             assert(fsel(v[ix]));
         auto vsel=v[ ixs ]; // index by VectIndex
-        assert(vsel.filter(fsel).count()==vsel.count());
+        
+        assert(vsel.filter(fsel)==vsel);
+        assert( v[fsel] == v[v.filterIndex(fsel)] ); // index by lambda
+        
     }
     cout << "ok\n";
     
