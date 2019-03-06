@@ -27,13 +27,30 @@ void testVect() {
     }
     cout << "ok\n";
     
-    cout << "testing append..";
+    cout << "testing append...";
     
-    int n=100000; // append test
-    float rs=0;
-    for (int i=0; i<n; i++) { v0 << i; rs+=i; }
-    assert(v0.sum()==rs && "append failure");
+    for (int ic=0; ic<200; ic++) {
+        v0.clear();
+        int n=100000; // append test
+        float rs=0;
+        for (int i=0; i<n; i++) { v0 << i; rs+=i; }
+        v0.fit(); // set memory to size
+        assert(v0.sum()==rs && "append failure");
+    }
+    cout << "ok\n";
     
+    cout << "testing erase()...";
+    for (int i=0; i<80; i++) {
+        const int ns=2000, nr=900;
+        VF v = VF::seq(ns), v0=VF::rnd(nr);
+        
+        for (int j=0; j<ns; j++)
+            assert( v.locate( v.erase(rand() % v.count()) )==-1 );
+        for (int j=0; j<nr; j++)
+            v0.locate( v0.erase(rand() % v0.count()) ); // possible dups (random)
+        
+        assert(v.count()==0 && v0.count()==0);
+    }
     cout << "ok\n";
     
     // test prefix ++, --
@@ -41,15 +58,14 @@ void testVect() {
     auto vorg=v0;
     ++v0;
     --v0;
-    
     cout << "ok\n";
     
     // seq & Vect[Vect++] vect indexing post increment
-     cout << "testing seq, iterator, sum, count...";
+    cout << "testing seq, iterator, sum, count...";
     auto vseq=VF::seq(0, 10, 0.1), vs0=vseq;
     for (auto d:vseq) vs0[vseq++]=d+1; // can access & increment iterator index
     assert(vseq.sum() == vs0.sum()-vs0.count());
-     cout << "ok\n";
+    cout << "ok\n";
     
     // aritmethic
     cout << "testing random, algebra...";

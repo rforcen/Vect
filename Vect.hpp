@@ -264,6 +264,23 @@ public:
         dealloc();
         size=realSize=0;
     }
+    T erase(size_t ix) { // return removed item
+        assert(ix>=0 && ix<size);
+        T c=data[ix];
+        if (ix<=size-1)
+           memmove(data+ix, data+ix+1, sizeof(T) * (size-ix-1));
+        size--;
+        return c;
+    }
+    void fit() { // fit current memory to size
+        if (size)
+            resize(size);
+    }
+    size_t locate(T c) {
+        for (size_t i=0; i<size; i++)
+            if (c==data[i]) return i;
+        return -1;
+    }
     
     Vect &operator=(const Vect &other) { // asignment
         // check for self-assignment
