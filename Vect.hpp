@@ -17,6 +17,7 @@
 
 template <class T>
 class Vect {
+    typedef Vect<size_t> VectIndex;
     
 private:
     size_t realSize=0;
@@ -226,6 +227,12 @@ public:
         for (auto const d:*this) if (lambda(d)) res<<d;
         return res;
     }
+    VectIndex filterIndex(std::function<bool(T)> const& lambda) { // indexes of selected items
+        VectIndex res;
+        for (size_t ix=0; ix<size; ix++)
+            if (lambda(data[ix])) res<<ix;
+        return res;
+    }
     
     T*begin() { _index=0; return data; }
     T*end() { return data+size; }
@@ -282,6 +289,7 @@ public:
         return -1;
     }
     
+    
     Vect &operator=(const Vect &other) { // asignment
         // check for self-assignment
         if (&other == this) return *this;
@@ -310,6 +318,11 @@ public:
         assert(!(v._index<0 || v._index>=size) && "Vect: index error");
         return data[v._index];
     };
+    Vect operator[](VectIndex &ixs) const { // index vect by vector of indexes
+        Vect v;
+        for (auto ix:ixs) v << data[ix];
+        return v;
+    }
     
     // boolean,
     bool operator==(const Vect &other) { // vect==vect
