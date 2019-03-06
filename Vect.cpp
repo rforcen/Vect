@@ -8,6 +8,9 @@
 
 #include "Vect.hpp"
 #include <math.h>
+#include <iostream>
+
+using std::cout;
 
 void testVect() {
     typedef Vect<float> VF;
@@ -16,26 +19,45 @@ void testVect() {
     VF v0, v1(100), v2(100);
     auto v4=v1;
     
+    cout << "testing >> ...";
+    float f;
+    for (auto d:vinit) { // must use iterator to make _inidex=0;
+        vinit >> f;
+        cout << f << ",";
+    }
+    cout << "ok\n";
+    
+    cout << "testing append..";
+    
     int n=100000; // append test
     float rs=0;
     for (int i=0; i<n; i++) { v0 << i; rs+=i; }
     assert(v0.sum()==rs && "append failure");
     
+    cout << "ok\n";
+    
     // test prefix ++, --
+    cout << "testing ++, -- ...";
     auto vorg=v0;
     ++v0;
     --v0;
-    assert(vorg==v0 && "inc, dec failure");
+    
+    cout << "ok\n";
     
     // seq & Vect[Vect++] vect indexing post increment
+     cout << "testing seq, iterator, sum, count...";
     auto vseq=VF::seq(0, 10, 0.1), vs0=vseq;
     for (auto d:vseq) vs0[vseq++]=d+1; // can access & increment iterator index
     assert(vseq.sum() == vs0.sum()-vs0.count());
+     cout << "ok\n";
     
     // aritmethic
+    cout << "testing random, algebra...";
     v1.random(); v2.random(); v4.random();
     v0 = (v1+v2/v4)*3;
+    cout << "ok\n";
     
+    cout << "testing ::rnd, <<, sum, logical ops., iterators, filter, reverse, sub, genWave, apply...";
     v0.clear(); // vect append
     
     auto v01=VF::rnd(400), v02=VF::rnd(500);
@@ -45,7 +67,7 @@ void testVect() {
     // for bigger v01, v02 sizes precission float may just not enough
     assert(fabs(v0.sum() - (v01.sum()+v02.sum())) < 1e-3);
     
-    for (int i=0; i<v1.length(); i++) // index (v2=v1)
+    for (int i=0; i<v1.length(); i++) // test index mutator & accesor. (v2=v1)
         v2[i] = v1[i];
     // logical ops
     assert(v1==v1     && "== failure");
@@ -57,8 +79,9 @@ void testVect() {
     assert(sum==v1.sum() && "iterator failure");
     
     // reverse
-    auto vrev = VF::seq(10), vw=vrev;
+    auto vrev = VF::seq(10), vseq1=VF::seq(10, 0.02), vw=vrev;
     assert(vrev == vw.reverse().reverse() && "reverse failure");
+    vseq = vseq1 * 0.01;
     
     // subvector (from, to)
     auto vsub = v0.sub(10,20);
@@ -79,7 +102,8 @@ void testVect() {
                              new float[3]{1,0.4,0.6}, new float[3]{200, 600, 1800}, new float[3]{0,0,0});
     
     VF v3(v0); // misc
-    auto v6=v3.scale(0,1);
+    auto v6=v3.norm();
+    assert( v6.filter( [](float x) -> bool { return x>=1.0 && x<0.0; }).count() == 0 );
     v6.sequence(0,5);
     
     // lambda apply func / sort
@@ -87,5 +111,6 @@ void testVect() {
     
     auto str=v3.toString();
     
+    cout << "test completed OK\n";
     
 }

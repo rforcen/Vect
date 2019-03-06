@@ -53,6 +53,11 @@ public:
         for (size_t i=0; i<size; i++) v<<i;
         return v;
     }
+    static Vect seq(size_t size, T inc) { // 0,inc, 2*inc, ...(n-1)*inc
+        Vect v;
+        for (size_t i=0; i<size; i++) v<<(T)i*inc;
+        return v;
+    }
     static Vect seq(double from, double to, double inc) {
         assert((from<to && inc!=0) && "seq paramaters error");
         Vect v;
@@ -158,8 +163,17 @@ public:
         auto mn=std::get<0>(mmd), df=std::get<2>(mmd);
         auto pdf=to-from;
         
-        for (auto &d:*this)
-            d = from + ((d-mn) / df) * pdf;
+        if(df)
+            for (auto &d:*this)
+                d = from + ((d-mn) / df) * pdf;
+        return *this;
+    }
+    Vect norm() {
+        auto mmd=minmaxdiff();
+        auto mn=std::get<0>(mmd), df=std::get<2>(mmd);
+        if(df)
+            for (auto &d:*this)
+                d = (d-mn) / df;
         return *this;
     }
     Vect fill(T value) {
@@ -168,8 +182,10 @@ public:
     }
     Vect sequence(T from, T to) {
         assert(!(from>to) && "sequence error: from > to");
-        T inc=(T)(to-from)/(T)size;
-        for (auto &d:*this) d = inc * (_index++);
+        if(size) {
+            T inc=(T)(to-from)/(T)size;
+            for (auto &d:*this) d = inc * (_index++);
+        }
         return *this;
     }
     Vect reverse() {
@@ -220,6 +236,10 @@ public:
     void operator << (const T c) {
         append(c);
     }
+    void operator >> (T &c) {
+        assert(_index<size);
+        c=data[_index++];
+    }
     void operator << (const Vect &other) {
         return append(other);
     }
@@ -257,7 +277,7 @@ public:
         for (auto &d:*this) d=c;
         return *this;
     }
-   
+    
     
     // index mutator
     inline T& operator[](size_t index) {
@@ -367,7 +387,8 @@ public:
         return *this;
     }
     Vect &operator/=(const T &c) {
-        for (auto &d:*this) d /= c;
+        if(c!=0)
+            for (auto &d:*this) d /= c;
         return *this;
     }
     
@@ -422,18 +443,19 @@ public:
         return *this;
     }
     
-    // ++, -- Vect, prefix ++v
-    Vect &operator++() {
-        for (auto &d:*this) d++;
-        return *this;
+    // ++, --
+    size_t &operator++() {
+        return ++_index;
     }
-    Vect &operator--() {
-        for (auto &d:*this) d--;
-        return *this;
+    size_t &operator--() {
+        return --_index;
     }
-    // postfix: Vect &operator++(int) implements _index++ -> v++
+    // postfix: &operator++(int) implements _index++ -> v++
     size_t operator++(int) {
         return _index++;
+    }
+    size_t operator--(int) {
+        return _index--;
     }
 };
 
