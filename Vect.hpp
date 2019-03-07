@@ -14,10 +14,12 @@
 #include <string>
 #include <functional>
 #include <sstream>
+#include <thread>
 
 template <class T>
 class Vect {
     typedef Vect<size_t> VectIndex;
+    typedef std::function<T(T)>const& Lambda;
     
 private:
     size_t realSize=0;
@@ -27,6 +29,16 @@ private:
     size_t size=0;
     size_t _index=0; // used in iterator
     
+    static T kahanSum(const T *v, size_t from, size_t to) { // sum vector range usign kahan algorithm
+        T s=0, c=0;
+        for (auto i=from; i<to; i++) {
+            auto y = v[i] - c, t = s + y;
+            c = (t - s) - y;
+            s = t;
+        }
+        return s;
+    }
+    
 public:
     // constructors
     Vect() { }
@@ -35,12 +47,31 @@ public:
         alloc(size);
     }
     Vect(const Vect &other) { // Vect v0(v1), v2=v1;
-        alloc(other.size);
-        std::copy(&other.data[0], &other.data[0] + size, &data[0]);
+        if(other.size>0) {
+            alloc(other.size);
+            memcpy(data, other.data, other.size * sizeof(T));
+        }
     }
     Vect(size_t size, T v[]){
         alloc(size);
         for (auto &d:*this) d=v[_index++];
+    }
+    Vect(T from, T to, T inc) {
+        assert(from < to && inc>0);
+        for (T x=from; x<to; x+=inc)
+            *this << x;
+    }
+    Vect(T from, T to, T inc, Lambda lambda) {
+        assert(from < to && inc>0);
+        for (T x=from; x<to; x+=inc)
+            *this << lambda(x);
+    }
+    Vect(Vect v, Lambda lambda) {
+        if(v.size>0) {
+            alloc(v.size);
+            memcpy(data, v.data, v.size * sizeof(T));
+            apply(lambda);
+        }
     }
     
     ~Vect() { dealloc(); }
@@ -59,8 +90,8 @@ public:
         for (size_t i=0; i<size; i++) v<<(T)i*inc;
         return v;
     }
-    static Vect seq(double from, double to, double inc) {
-        assert((from<to && inc!=0) && "seq paramaters error");
+    static Vect seq(T from, T to, T inc) {
+        assert((from<to && inc>0) && "seq paramaters error");
         Vect v;
         for (double i=from; i<to; i+=inc) v<<i;
         return v;
@@ -123,7 +154,7 @@ public:
     void rand01() {
         apply([]() -> T { return (T)rand()/(T)RAND_MAX; });
     }
-    T sum() {
+    T __seq_sum() { // generates precission errors -> apply kahan algo.
         T s=0;
         for (auto d:*this) s+=d;
         return s;
@@ -212,9 +243,16 @@ public:
         std::sort(begin(), end(), [](T a, T b){ return b<a; });
         return *this;
     }
+    Vect shuffle() {
+        if (size > 1) {
+            for (int i=0; i<size; i++)
+                std::swap<T>(data[i], data[(rand() % (i + 1))]);
+        }
+        return *this;
+    }
     
-    // apply labda func, i.e: v2.apply(sinf).sort().apply([](float x){ return x*x; });
-    Vect apply(std::function<T(T)> const& lambda) { // usage: v.apply(sin)
+    
+    Vect apply(Lambda lambda) { // apply labda func -> mutable, usage: v.apply(sin)
         for (auto &d:*this) d=lambda(d);
         return *this;
     }
@@ -222,10 +260,96 @@ public:
         for (auto &d:*this) d=lambda();
         return *this;
     }
+    Vect func(Lambda lambda) { // non mutable -> return a copy applying func
+        Vect v(*this);
+        for (auto &d:v) d=lambda(d);
+        return v;
+    }
+    Vect func(std::function<T()> const& lambda) { // usage: func(funcNoArgs)
+        Vect v(*this);
+        for (auto &d:v) d=lambda();
+        return v;
+    }
+    
+    class ThreadedCalc { //  multithreading support
+    public:
+        std::thread *thds=nullptr;
+        int nthreads=0;
+        size_t *ranges=nullptr;
+        
+        ThreadedCalc(size_t size) {
+            init(size);
+        }
+        ThreadedCalc(Vect&v) {
+            init(v.size);
+        }
+        ThreadedCalc(Vect&v, Lambda lambda) {
+            init(v.size);
+            runFunc(v, lambda);
+        }
+        void init(size_t size) {
+            nthreads = std::thread::hardware_concurrency();
+            thds = new std::thread[nthreads];
+            
+            auto segSize=size/(nthreads-1);
+            ranges=new size_t[nthreads+1];
+            for (size_t t=0, rg=0; t<nthreads; t++, rg+=segSize) ranges[t]=rg;
+            ranges[nthreads]=size;
+        }
+        void join() {
+            for (int i=0; i<nthreads; i++)
+                thds[i].join();
+        }
+        void runFunc(Vect &v, Lambda lambda) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, &v, t, lambda]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        v.data[i] = lambda(v.data[i]);
+                });
+            }
+            join();
+        }
+        
+        
+        T runSum(const Vect &v) {
+            T *ss=new T[nthreads];
+            size_t from, to;
+            
+            for (int t=0; t<nthreads; t++) {
+                from=ranges[t]; to=ranges[t+1];
+                thds[t] = std::thread([this, &v, t, from, to, ss]()   {
+                    ss[t]=kahanSum(v.data, from, to);
+                });
+            }
+            join();
+            
+            return kahanSum(ss, 0, nthreads);
+        }
+        ~ThreadedCalc() {
+            if(ranges!=nullptr) {
+                delete[] thds;
+                delete[] ranges;
+            }
+        }
+    };
+    
+    Vect mtFunc(std::function<T(T)> const& lambda) { // multithreading func, usage: mtFunc(funcNoArgs)
+        Vect v(*this);
+        ThreadedCalc tc(v, lambda);
+        return v;
+    }
+    T mtSum() { // multithreading func, usage: mtFunc(funcNoArgs), v.mtSum()!=v.sum() due to precission error
+        ThreadedCalc tc(*this);
+        return tc.runSum(*this);
+    }
+    T sum() { // Kahan summation algorithm, sequential sum generates precission errors
+        return kahanSum(data, 0, size);
+    }
+    
     Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda conditional expr.
-        Vect res;
-        for (auto const d:*this) if (lambda(d)) res<<d;
-        return res;
+        Vect v;
+        for (auto const d:*this) if (lambda(d)) v<<d;
+        return v;
     }
     VectIndex filterIndex(std::function<bool(T)> const& lambda) { // indexes of selected items
         VectIndex res;
@@ -275,7 +399,7 @@ public:
         assert(ix>=0 && ix<size);
         T c=data[ix];
         if (ix<=size-1)
-           memmove(data+ix, data+ix+1, sizeof(T) * (size-ix-1));
+            memmove(data+ix, data+ix+1, sizeof(T) * (size-ix-1));
         size--;
         return c;
     }
@@ -344,13 +468,12 @@ public:
         return eq;
     }
     bool operator!=(const Vect &other) {
-        bool neq = (size!=other.size);
-        if(neq) {}
-        else {
+        bool eq = (size==other.size);
+        if(eq) {
             for (size_t i = 0; i < size; i++)
-                if (data[i] == other.data[i]) { neq=false; break; }
+                if (data[i] != other.data[i]) break;
         }
-        return neq;
+        return eq;
     }
     bool operator!=(const T c) { // vect != scalar
         bool res=true;
