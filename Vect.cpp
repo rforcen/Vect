@@ -9,30 +9,71 @@
 #include <math.h>
 #include <iostream>
 
+#include <ctime>
+#include <chrono>
+#include <ratio>
+
 using std::cout;
 
+class Timer {
+    std::chrono::high_resolution_clock::time_point begin, end;
+public:
+    void start() {
+        begin = std::chrono::high_resolution_clock::now();
+    }
+    long lap() {
+        end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> time_span = end - begin;
+        return (long)time_span.count();
+    }
+};
 
 void testVect() {
     typedef double real;
     typedef Vect<real> VectReal;
     real sin(real x), cos(real), tan(real); // required to differenciate float/real versions
+    Timer timer;
     
     VectReal vinit(5, new real[5]{0,1,2,3,4});
     VectReal v0, v1(100), v2(100);
     auto v4=v1;
     
-    cout << "testing >> ...";
-    real f;
-    for (auto d:vinit) { // must use iterator to make _inidex=0;
-        (void)d; // not used
-        vinit >> f;
-        cout << f << ",";
-    }
-    cout << "ok\n";
+    puts("test started");
     
+    puts("testing init vector, iterator...");
+    {
+        real f;
+        for (auto d:vinit) { // must use iterator to make _inidex=0;
+            (void)d; // not used
+            vinit >> f;
+            cout << f << ",";
+        }
+        cout << "ok\n";
+    }
+    
+    printf("testing bsearch...");
+    {
+        double inc=1e-6;
+        VectReal v(0,1, inc);
+        v.sort();
+        
+        timer.start();
+        int iters=0;
+        for (double d=0.2; d<0.4; d+=inc) {
+            assert(v.bsearch(d)!=-1);
+            iters++;
+        }
+        printf("%d iterations in %ld ms, ",iters, timer.lap());
+    }
+    puts("ok");
+    
+    timer.start();
     cout << "testing sequence / lambda constructor...";
     for (int ic=0; ic<100; ic++)    {
-        VectReal vs(0, M_PI, 0.001), lsin(0.0, M_PI, 0.01, sin), lcos(0, M_PI_2, 0.001, cos); // from,to,inc, func
+        VectReal    vs(0, M_PI, 0.001),
+        lsin(0.0, M_PI, 0.01, sin),
+        lcos(0, M_PI_2, 0.001, cos); // from,to,inc, func
+        
         v0 = VectReal(0, 1, 0.0001);
         
         // simulate graph data x-axis, y-lambda
@@ -40,10 +81,11 @@ void testVect() {
         assert(vy.norm() == vytest.norm());
         assert(vx.func(tan) == vx.func(sin) / vx.func(cos)); // tan = sin/cos
         
-        if (ic==0) cout << vs.sum() << ", " << lsin.sum() << ", " << lcos.sum() << " ok\n";
+        if (ic==0) cout << vs.sum() << ", " << lsin.sum() << ", " << lcos.sum() << " time:" << timer.lap() <<  "ms ok\n";
     }
     // shuffle
     cout << "shuffle test...";
+    timer.start();
     auto vorg=VectReal(0, 1, 1e-4), vsh=vorg;
     vsh.shuffle();
     assert( vsh != vorg );
@@ -51,25 +93,39 @@ void testVect() {
         assert(vorg.locate(d)!=-1);
     
     cout << "ok, shuffle sum error=" << abs(vorg.sum() - vsh.sum()) << " due to kahan algo.\n";
-    cout << " sums: shuffle sum=" << vsh.sum() << " , original sum=" << vorg.mtSum() << ", kahan sum=" << vsh.sum() << "\n";
+    cout << " sums: shuffle sum=" << vsh.sum() << " , original sum=" << vorg.sum() << ", kahan sum=" << vsh.sum() << "\n";
     assert( abs(vsh.sum() - vorg.sum()) == 0); //  this is only possible using kahan algo. in other case diff != 0
+    cout << "duration: " << timer.lap() << "ms\n";
     
     // multithreading
-     cout << "testing multitheading func...";
+    cout << "testing multitheading func...";
     for (int ic=0; ic<3; ic++) {
-        VectReal vmt(0, 1, 1e-4);
+        long t1,t2;
+        
+        VectReal vmt(0, 1, 1e-7);
         auto foo = [](real x){ return sin(x);};
+        
+        timer.start();
         auto vmtf = vmt.mtFunc(foo); // the mt version
-        cout << "mt done, now st...";
+        cout << "mt done in " << timer.lap() << "ms, now st...";
+        
+        timer.start();
         auto vff=vmt.func(foo); // st version... see the timing difference?
         assert(vff==vmtf);
-        cout << "done\nnow mtSum...";
-        auto smt=vff.mtSum();
-        cout << "done, now st..."<< abs(vff.sum() - smt);
-//        assert(smt == vff.sum()); //  can't assurance due to double sum precission error
+        
+        cout << "done in " << timer.lap() << "ms\nnow mtSum...";
+        
+        timer.start(); // mtSum vs. sum
+        auto smt=vff.sum();
+        t1=timer.lap();
+        cout << "done in " << t1 << "ms, now st...";
+        timer.start();
+        vff.stSum();
+        t2=timer.lap();
+        cout << "done in " << t2 << "ms ratio= " << t2/t1; // ratio 5
+        assert(smt == vff.sum()); //  ok due to kahan sum algo.
         cout << " ok\n";
     }
-    
     
     cout << "testing append...";
     for (int ic=0; ic<200; ic++) {
@@ -194,9 +250,25 @@ void testVect() {
     // lambda apply func / sort
     v2.apply(sin).sort().apply([](real x) -> real { return x*x; });
     
+    // mt vs. st apply -> ratio is 2.5 approx.
+    {
+        VectReal v=VectReal(0,1,1e-8);
+        
+        puts("testing apply in mt vs. st modes, now in MT...");
+        
+        timer.start(); // mt
+        v.mtApply(sin);
+        auto tmt=timer.lap();
+        printf("done in %ld ms, now in ST...", tmt);
+        
+        timer.start(); // st
+        v.apply(sin);
+        auto tst=timer.lap();
+        printf("done in %ld ms, ratio %.1f\n", tst, (double)tst/tmt);
+    }
     auto str=v3.toString();
     
-    cout << "test completed OK\n";
+    puts("\ntest completed OK\n");
     fflush(stdout);
     
 }

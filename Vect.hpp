@@ -16,10 +16,75 @@
 #include <sstream>
 #include <thread>
 
+
 template <class T>
 class Vect {
     typedef Vect<size_t> VectIndex;
     typedef std::function<T(T)>const& Lambda;
+    
+    
+    
+    class ThreadedCalc { //  multithreading support
+    public:
+        std::thread *thds=nullptr;
+        int nthreads=0;
+        size_t *ranges=nullptr;
+        
+        ThreadedCalc(size_t size) {
+            init(size);
+        }
+        ThreadedCalc(Vect&v) {
+            init(v.size);
+        }
+        ThreadedCalc(Vect&v, Lambda lambda) {
+            init(v.size);
+            runFunc(v, lambda);
+        }
+        void init(size_t size) {
+            nthreads = std::thread::hardware_concurrency();
+            thds = new std::thread[nthreads];
+            
+            auto segSize=size/nthreads;
+            ranges=new size_t[nthreads+1];
+            for (size_t t=0, rg=0; t<nthreads; t++, rg+=segSize) ranges[t]=rg;
+            ranges[nthreads]=size;
+        }
+        void join() {
+            for (int i=0; i<nthreads; i++)
+                thds[i].join();
+        }
+        void runFunc(Vect &v, Lambda lambda) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, &v, t, lambda]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        v.data[i] = lambda(v.data[i]);
+                });
+            }
+            join();
+        }
+        
+        
+        T runSum(const Vect &v) {
+            T *ss=new T[nthreads];
+            size_t from, to;
+            
+            for (int t=0; t<nthreads; t++) {
+                from=ranges[t]; to=ranges[t+1];
+                thds[t] = std::thread([this, &v, t, from, to, ss]()   {
+                    ss[t]=kahanSum(v.data, from, to);
+                });
+            }
+            join();
+            
+            return kahanSum(ss, 0, nthreads);
+        }
+        ~ThreadedCalc() {
+            if(ranges!=nullptr) {
+                delete[] thds;
+                delete[] ranges;
+            }
+        }
+    };
     
 private:
     size_t realSize=0;
@@ -40,6 +105,7 @@ private:
     }
     
 public:
+    
     // constructors
     Vect() { }
     
@@ -250,7 +316,9 @@ public:
         }
         return *this;
     }
-    
+    T stSum() { // Single Thread Kahan summation algorithm, sequential sum generates precission errors
+        return kahanSum(data, 0, size);
+    }
     
     Vect apply(Lambda lambda) { // apply labda func -> mutable, usage: v.apply(sin)
         for (auto &d:*this) d=lambda(d);
@@ -271,80 +339,22 @@ public:
         return v;
     }
     
-    class ThreadedCalc { //  multithreading support
-    public:
-        std::thread *thds=nullptr;
-        int nthreads=0;
-        size_t *ranges=nullptr;
-        
-        ThreadedCalc(size_t size) {
-            init(size);
-        }
-        ThreadedCalc(Vect&v) {
-            init(v.size);
-        }
-        ThreadedCalc(Vect&v, Lambda lambda) {
-            init(v.size);
-            runFunc(v, lambda);
-        }
-        void init(size_t size) {
-            nthreads = std::thread::hardware_concurrency();
-            thds = new std::thread[nthreads];
-            
-            auto segSize=size/(nthreads-1);
-            ranges=new size_t[nthreads+1];
-            for (size_t t=0, rg=0; t<nthreads; t++, rg+=segSize) ranges[t]=rg;
-            ranges[nthreads]=size;
-        }
-        void join() {
-            for (int i=0; i<nthreads; i++)
-                thds[i].join();
-        }
-        void runFunc(Vect &v, Lambda lambda) {
-            for (int t=0; t<nthreads; t++) {
-                thds[t] = std::thread([this, &v, t, lambda]() {
-                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
-                        v.data[i] = lambda(v.data[i]);
-                });
-            }
-            join();
-        }
-        
-        
-        T runSum(const Vect &v) {
-            T *ss=new T[nthreads];
-            size_t from, to;
-            
-            for (int t=0; t<nthreads; t++) {
-                from=ranges[t]; to=ranges[t+1];
-                thds[t] = std::thread([this, &v, t, from, to, ss]()   {
-                    ss[t]=kahanSum(v.data, from, to);
-                });
-            }
-            join();
-            
-            return kahanSum(ss, 0, nthreads);
-        }
-        ~ThreadedCalc() {
-            if(ranges!=nullptr) {
-                delete[] thds;
-                delete[] ranges;
-            }
-        }
-    };
     
-    Vect mtFunc(std::function<T(T)> const& lambda) { // multithreading func, usage: mtFunc(funcNoArgs)
+    // MT methods
+    Vect mtFunc(std::function<T(T)> const& lambda) { // multithreading func, usage: mtFunc(func) / T func(T)
         Vect v(*this);
         ThreadedCalc tc(v, lambda);
         return v;
     }
-    T mtSum() { // multithreading func, usage: mtFunc(funcNoArgs), v.mtSum()!=v.sum() due to precission error
+    Vect mtApply(std::function<T(T)> const& lambda) { // multithreading apply, usage: mtFunc(func) / T func(T)
+        ThreadedCalc tc(*this, lambda);
+        return *this;
+    }
+    T sum() { // multithreading func, usage: mtFunc(funcNoArgs), v.mtSum()!=v.sum() due to precission error
         ThreadedCalc tc(*this);
         return tc.runSum(*this);
     }
-    T sum() { // Kahan summation algorithm, sequential sum generates precission errors
-        return kahanSum(data, 0, size);
-    }
+   
     
     Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda conditional expr.
         Vect v;
@@ -411,6 +421,12 @@ public:
         for (size_t i=0; i<size; i++)
             if (c==data[i]) return i;
         return -1;
+    }
+    size_t bsearch(T c) { //  binary search -> must be sorted
+        auto ret = std::bsearch(&c, begin(), size, sizeof(T),
+                                [](const void*a, const void*b) ->int { return (int)(*((T*)a) - *((T*)b));});
+        if(ret==nullptr) return -1;
+        return (T*)ret-begin();
     }
     
     
