@@ -29,16 +29,137 @@ public:
 };
 
 void testVect() {
+    puts("test started\n");
+    
+    printf("testing creators...");
     typedef double real;
     typedef Vect<real> VectReal;
     real sin(real x), cos(real), tan(real); // required to differenciate float/real versions
     Timer timer;
     
     VectReal vinit(5, new real[5]{0,1,2,3,4});
-    VectReal v0, v1(100), v2(100);
+    VectReal v0, v1(1000), v2(1000);
     auto v4=v1;
+    puts("ok");
     
-    puts("test started");
+    printf("testing operators...");
+    timer.start();
+    { // operators
+        double n=1e7;
+        VectReal v(n), v1=v+3.0;
+        
+        assert(v1.sum() == n*3);
+        assert((v1-3).sum() == 0);
+        assert(v1-3 == v);
+        assert(v1*5 == v1/(1./5.));
+        assert((v1^2) == v1*v1);
+        assert((v1^3) == v1*v1*v1);
+        
+        printf("done for size %.0f in %ld ms\n", n, timer.lap());
+    }
+   
+    puts("testing sequence / lambda constructor...");
+    timer.start();
+    for (int ic=0; ic<100; ic++)    {
+        VectReal    vs(0, M_PI, 0.001),
+        lsin(0.0, M_PI, 0.01, sin),
+        lcos(0, M_PI_2, 0.001, cos); // from,to,inc, func
+        
+        v0 = VectReal(0, 1, 0.0001);
+        
+        // simulate graph data x-axis, y-lambda
+        VectReal vx(0, M_PI, 1e-4), vy(vx, sin), vytest=vx.func(sin);
+        
+        assert(vy.max() == vytest.seqMax());
+        assert(vy.min() == vytest.seqMin());
+        assert(vy == vytest);
+        assert(vy.norm() == vytest.norm());
+        assert(vx.func(tan) == vx.func(sin) / vx.func(cos)); // tan = sin/cos
+        
+        if (ic==0) cout << vs.sum() << ", " << lsin.sum() << ", " << lcos.sum() << " time:" << timer.lap() <<  " ms ok\n";
+    }
+    
+    puts("locate, seq generation st/mt"); // sequential generation st/mt, ratio=2.3
+    {
+        long ls, lm;
+        real inc=1e-8;
+        
+        timer.start(); // seq st/mt ratio = 4 for 1e8 values
+        printf("generating data st...");
+        VectReal v=VectReal::stSeq(0, 1, inc);
+        printf("done in %ld ms\n", ls=timer.lap());
+
+        printf("generating data mt...");
+        timer.start();
+        VectReal vm(0, 1, inc);
+        lm=timer.lap();
+        printf("done in %ld ms, ratio %.1f, ", lm, (double)ls/lm );
+        auto diff = abs((v - vm).sum());
+        printf("error=%e are eq:%d\n", diff, v==vm);
+        
+        timer.start();
+        printf("locate st...");
+        for (size_t i=v.count()-5; i<v.count(); i++) assert(v.locate(v[i])!=-1);
+        printf("done in %ld ms, now in mt...", ls=timer.lap());
+        timer.start();
+        for (size_t i=v.count()-5; i<v.count(); i++) assert(v.mtLocate(v[i])!=-1);
+        lm=timer.lap();
+        printf("done in %ld ms, rate st/mt = %.1f ", lm, (double)ls/lm );
+        assert(v==vm);
+    }
+    puts("ok");
+    
+    puts("test mt vector min/max."); // ratio = 3.1
+    {
+        int n=1e8;
+        Vect<double> v1=VectReal::rnd(n);
+        real maxst, minst, maxmt, minmt;
+        long lmmmt,lmt, lst;
+        
+        printf("mt min/max...");
+        
+        timer.start(); // mt
+        auto minmaxmt = v1.minmax();
+        printf("done minmax in %ld ms, now min,max mt...", lmmmt=timer.lap());
+        
+        timer.start(); // mt
+        maxmt = v1.max();
+        minmt = v1.min();
+        printf("done in %ld ms, now st...", lmt=timer.lap());
+        
+        timer.start(); //  st
+        maxst = v1.max(); minst = v1.min();
+        lst=timer.lap();
+        
+        printf("done in %ld ms, ratio (st/mt)= %.1f ", lst, (double)lst/lmt);
+        
+        assert(maxmt == maxst && minmt == minst && minmaxmt.first == minst && minmaxmt.second == maxst);
+    }
+    puts("ok");
+    
+    puts("test mt vector mult."); // ratio = 1 not worth it
+    {
+        int n=1e8;
+        Vect<double> v1=VectReal::rnd(n), v2(v1);
+        long lmt, lst;
+        
+        printf("mt sum v1*v2...");
+        
+        timer.start(); // mt
+        auto vmt=v1 / v2; // v1.MToper(v2, VectReal::opMUL);
+        printf("done in %ld ms, now st...", lmt=timer.lap());
+        
+        timer.start(); //  st
+        auto vst=v1 / v2;
+        lst=timer.lap();
+        
+        printf("done in %ld ms, ratio (st/mt)= %.1f ", lst, (double)lst/lmt);
+        
+        assert(vmt == vst);
+    }
+    puts("ok");
+    
+   
     
     puts("testing init vector, iterator...");
     {
@@ -67,22 +188,7 @@ void testVect() {
     }
     puts("ok");
     
-    timer.start();
-    cout << "testing sequence / lambda constructor...";
-    for (int ic=0; ic<100; ic++)    {
-        VectReal    vs(0, M_PI, 0.001),
-        lsin(0.0, M_PI, 0.01, sin),
-        lcos(0, M_PI_2, 0.001, cos); // from,to,inc, func
-        
-        v0 = VectReal(0, 1, 0.0001);
-        
-        // simulate graph data x-axis, y-lambda
-        VectReal vx(0, M_PI, 1e-4), vy(vx, sin), vytest=vx.func(sin);
-        assert(vy.norm() == vytest.norm());
-        assert(vx.func(tan) == vx.func(sin) / vx.func(cos)); // tan = sin/cos
-        
-        if (ic==0) cout << vs.sum() << ", " << lsin.sum() << ", " << lcos.sum() << " time:" << timer.lap() <<  "ms ok\n";
-    }
+   
     // shuffle
     cout << "shuffle test...";
     timer.start();
@@ -106,11 +212,11 @@ void testVect() {
         auto foo = [](real x){ return sin(x);};
         
         timer.start();
-        auto vmtf = vmt.mtFunc(foo); // the mt version
+        auto vmtf = vmt.func(foo); // the mt version
         cout << "mt done in " << timer.lap() << "ms, now st...";
         
         timer.start();
-        auto vff=vmt.func(foo); // st version... see the timing difference?
+        auto vff=vmt.seqFunc(foo); // st version... see the timing difference?
         assert(vff==vmtf);
         
         cout << "done in " << timer.lap() << "ms\nnow mtSum...";
@@ -160,7 +266,7 @@ void testVect() {
     
     // seq & Vect[Vect++] vect indexing post increment
     cout << "testing seq, iterator, sum, count...";
-    auto vseq=VectReal::seq(0, 100, 0.1), vs0=vseq;
+    auto vseq=VectReal::stSeq(0, 100, 0.1), vs0=vseq;
     for (auto d:vseq) vs0[vseq++]=d+1; // can access & increment iterator index
     assert(vseq.sum() - ( vs0.sum()-vs0.count() ) == 0); //  again kahan algo makes the magic preservin precission
     cout << "ok, error=" << vseq.sum() - ( vs0.sum()-vs0.count() )  << "\n";
@@ -252,12 +358,12 @@ void testVect() {
     
     // mt vs. st apply -> ratio is 2.5 approx.
     {
-        VectReal v=VectReal(0,1,1e-8);
+        
         
         puts("testing apply in mt vs. st modes, now in MT...");
         
         timer.start(); // mt
-        v.mtApply(sin);
+        VectReal v=VectReal(0,1,1e-8, sin);
         auto tmt=timer.lap();
         printf("done in %ld ms, now in ST...", tmt);
         

@@ -19,27 +19,45 @@
 
 template <class T>
 class Vect {
+public:
     typedef Vect<size_t> VectIndex;
     typedef std::function<T(T)>const& Lambda;
+    typedef enum { opADD, opSUB, opMUL, opDIV, opPOW } Operator;
     
-    
+    class Kahan {
+    private:
+        T s=0, c=0, inc=1, y, t;
+    public:
+        Kahan(T inc=1)  : inc(inc) {
+            s = c = 0;
+        }
+        T next() {
+            y = s+inc /*v[i]*/ - c;
+            t = s + y;
+            c = (t - s) - y;
+            s = t;
+            
+            return s;
+        }
+    };
     
     class ThreadedCalc { //  multithreading support
     public:
         std::thread *thds=nullptr;
         int nthreads=0;
         size_t *ranges=nullptr;
+        T *thValues=nullptr;
+        T *maxv, *minv;
+        Vect*vect=nullptr;
         
-        ThreadedCalc(size_t size) {
-            init(size);
-        }
-        ThreadedCalc(Vect&v) {
+        ThreadedCalc(Vect&v) : vect(&v) {  init(v.size);  }
+       
+        ThreadedCalc(Vect&v, std::function<T()> const& lambda) : vect(&v) {
             init(v.size);
+            apply(lambda);
         }
-        ThreadedCalc(Vect&v, Lambda lambda) {
-            init(v.size);
-            runFunc(v, lambda);
-        }
+        Vect getVect() { return *vect; }
+    private:
         void init(size_t size) {
             nthreads = std::thread::hardware_concurrency();
             thds = new std::thread[nthreads];
@@ -48,40 +66,165 @@ class Vect {
             ranges=new size_t[nthreads+1];
             for (size_t t=0, rg=0; t<nthreads; t++, rg+=segSize) ranges[t]=rg;
             ranges[nthreads]=size;
+            
+            thValues=new T[nthreads];
+            maxv=new T[nthreads];
+            minv=new T[nthreads];
         }
-        void join() {
+        void joinAll() {
             for (int i=0; i<nthreads; i++)
                 thds[i].join();
         }
-        void runFunc(Vect &v, Lambda lambda) {
+    public:
+        void apply(Lambda lambda) {
             for (int t=0; t<nthreads; t++) {
-                thds[t] = std::thread([this, &v, t, lambda]() {
+                thds[t] = std::thread([this, t, lambda]() {
                     for (auto i=ranges[t]; i<ranges[t+1]; i++)
-                        v.data[i] = lambda(v.data[i]);
+                        vect->data[i] = lambda(vect->data[i]);
                 });
             }
-            join();
+            joinAll();
+        }
+        void apply(T from, T to, T inc, Lambda lambda) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, from, inc, lambda]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        vect->data[i] = lambda(from + inc * i);
+                });
+            }
+            joinAll();
+        }
+        void apply( std::function<T()> const& lambda) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, lambda]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        vect->data[i] = lambda();
+                });
+            }
+            joinAll();
         }
         
+        T sum() {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t]()   {
+                    thValues[t]=kahanSum(vect->data, ranges[t], ranges[t+1]);
+                });
+            }
+            joinAll();
+            
+            return kahanSum(thValues, 0, nthreads);
+        }
         
-        T runSum(const Vect &v) {
-            T *ss=new T[nthreads];
-            size_t from, to;
+        Vect evaluate(const Vect &v1, const Vect &v2, Operator op) { //  ratio 1.2 improvement w/8 threads
+            assert(v1.size==v2.size);
+            Vect v(v1.size);
             
             for (int t=0; t<nthreads; t++) {
-                from=ranges[t]; to=ranges[t+1];
-                thds[t] = std::thread([this, &v, t, from, to, ss]()   {
-                    ss[t]=kahanSum(v.data, from, to);
+                thds[t] = std::thread([this, &v, &v1, &v2, t, op]()   {
+                    switch (op) {
+                        case opADD: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] + v2[i];   break;
+                        case opSUB: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] - v2[i];   break;
+                        case opMUL: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] * v2[i];   break;
+                        case opDIV: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] / v2[i];   break;
+                        case opPOW: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=pow(v1[i], v2[i]);   break;
+                    }
                 });
             }
-            join();
-            
-            return kahanSum(ss, 0, nthreads);
+            joinAll();
+            return v;
         }
+        Vect evaluate(const T c, Operator op) { //  ratio 1.2 improvement w/8 threads
+            
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, c, op]()   {
+                    switch (op) {
+                        case opADD: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i]+=c;   break;
+                        case opSUB: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i]-=c;   break;
+                        case opMUL: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i]*=c;   break;
+                        case opDIV: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i]/=c;   break;
+                        case opPOW: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i]=pow(vect->data[i],c);   break;
+                    }
+                });
+            }
+            joinAll();
+            return *vect;
+        }
+        
+        T min() { return minmax().first;  }
+        T max() { return minmax().second; }
+        std::pair<T,T>minmax() {
+            assert(vect->size>0);
+            volatile T resmax=*vect->data, resmin=*vect->data;
+            
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t]()   {
+                    volatile T max=vect->data[ranges[t]], min=max;
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++) {
+                        if (vect->data[i] > max) max=vect->data[i];
+                        if (vect->data[i] < min) min=vect->data[i];
+                    }
+                    maxv[t]=max;
+                    minv[t]=min;
+                });
+            }
+            joinAll();
+            
+            resmax = *std::max_element(maxv, maxv+nthreads);
+            resmin = *std::min_element(minv, minv+nthreads);
+            
+            return std::pair<T,T>(resmin, resmax);
+        }
+        size_t locate(const T c) {
+            assert(vect->size>0);
+            volatile size_t res=-1;
+            volatile bool found=false;
+            
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, &res, t, c, &found]()   {
+                    for (auto i=ranges[t]; i<ranges[t+1] && !found; i++)
+                        if (vect->data[i] == c) { res=i; found=true; break; };
+                });
+            }
+            joinAll();
+            return res;
+        }
+        void seq() {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        vect->data[i] = (T)i;
+                });
+            }
+            joinAll();
+        }
+        void seq(T inc) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, inc]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        vect->data[i] = inc * i;
+                });
+            }
+            joinAll();
+        }
+       
+        void seq(T from, T to, T inc) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, from, inc]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        vect->data[i] = from + inc*i;
+                });
+            }
+            joinAll();
+        }
+        
         ~ThreadedCalc() {
             if(ranges!=nullptr) {
                 delete[] thds;
                 delete[] ranges;
+                delete[] thValues;
+                delete[] maxv;
+                delete[] minv;
+                ranges=nullptr;
             }
         }
     };
@@ -103,13 +246,16 @@ private:
         }
         return s;
     }
+    static size_t sizeOfRange(const T from, const T to, const T inc) {
+        return (size_t)ceil((to-from)/inc);
+    }
     
 public:
     
     // constructors
     Vect() { }
     
-    Vect(size_t size) {
+    Vect(const size_t size) {
         alloc(size);
     }
     Vect(const Vect &other) { // Vect v0(v1), v2=v1;
@@ -118,50 +264,55 @@ public:
             memcpy(data, other.data, other.size * sizeof(T));
         }
     }
-    Vect(size_t size, T v[]){
+    Vect(const size_t size, const T v[]){
         alloc(size);
         for (auto &d:*this) d=v[_index++];
     }
-    Vect(T from, T to, T inc) {
-        assert(from < to && inc>0);
-        for (T x=from; x<to; x+=inc)
-            *this << x;
+    Vect(const T from, const T to, const T inc) {
+        alloc(sizeOfRange(from, to, inc));
+        ThreadedCalc(*this).seq(from, to, inc);
     }
     Vect(T from, T to, T inc, Lambda lambda) {
         assert(from < to && inc>0);
-        for (T x=from; x<to; x+=inc)
-            *this << lambda(x);
+        alloc( sizeOfRange(from, to, inc) );
+        ThreadedCalc(*this).apply(from, to, inc, lambda);
     }
-    Vect(Vect v, Lambda lambda) {
+    Vect(const Vect &v, Lambda lambda) { // Vect<double>vx(0, M_PI, 0.001), vy(vx, sin);
         if(v.size>0) {
-            alloc(v.size);
-            memcpy(data, v.data, v.size * sizeof(T));
-            apply(lambda);
+            *this = v; // make a copy & apply lambda to copy (*this)
+            ThreadedCalc(*this).apply(lambda);
         }
     }
     
     ~Vect() { dealloc(); }
     
     static Vect rnd(int size) { // norm random
+        assert(size>0);
         Vect v(size);
-        return v.apply([]() -> T{ return (T)rand()/(T)RAND_MAX; });
+        ThreadedCalc(v, []() -> T{ return (T)rand()/(T)RAND_MAX; });
+        return v;
     }
     static Vect seq(size_t size) { // 0,1...n-1
-        Vect v;
-        for (size_t i=0; i<size; i++) v<<i;
+        assert(size>0);
+        Vect v(size);
+        ThreadedCalc(v).seq();
         return v;
     }
     static Vect seq(size_t size, T inc) { // 0,inc, 2*inc, ...(n-1)*inc
-        Vect v;
-        for (size_t i=0; i<size; i++) v<<(T)i*inc;
+        assert(size>0);
+        Vect v(size);
+        ThreadedCalc(v).seq(inc);
         return v;
     }
-    static Vect seq(T from, T to, T inc) {
+   
+    static Vect stSeq(T from, T to, T inc) {
         assert((from<to && inc>0) && "seq paramaters error");
-        Vect v;
-        for (double i=from; i<to; i+=inc) v<<i;
+        Vect v(sizeOfRange(from, to, inc));
+        for (size_t i=0; i<v.length(); i++) v.data[i]=(T)i * inc;
         return v;
     }
+    
+    
     static Vect genWave(T secs, int sampleRate, int nw, T amp[], T hz[], T phase[]) {
         Vect v;
         for (T t=0; t<secs*sampleRate; t++) {
@@ -188,6 +339,8 @@ private:
     }
     void resize(size_t size) {
         assert (((data = (T*)realloc(data, size*sizeof(T))) != nullptr ) && "realloc error, memory full?");
+        if(size>this->size)
+            memset(this->data, 0, (size-this->size) * sizeof(T));
         realSize = this->size = size;
     }
     
@@ -215,17 +368,17 @@ public:
         return sub(size-n, size);
     }
     void random() {
-        apply([]() -> T {return (T)rand();});
+        ThreadedCalc(*this, []() -> T {return (T)rand();});
     }
     void rand01() {
-        apply([]() -> T { return (T)rand()/(T)RAND_MAX; });
+        ThreadedCalc(*this, []() -> T { return (T)rand()/(T)RAND_MAX; });
     }
-    T __seq_sum() { // generates precission errors -> apply kahan algo.
+    T seqSum() { // don't use as it generates precission errors -> apply kahan algo.
         T s=0;
         for (auto d:*this) s+=d;
         return s;
     }
-    std::pair<T,T>minmax() {
+    std::pair<T,T>seqMinmax() {
         T mx=*data, mn=*data;
         for (size_t i=0; i<size; i++) {
             if(data[i]>mx) mx=data[i];
@@ -233,28 +386,37 @@ public:
         }
         return std::pair<T,T>(mn,mx);
     }
-    std::tuple<T,T,T>minmaxdiff() {
-        auto mm=minmax();
+    std::tuple<T,T,T>seqMinmaxdiff() {
+        auto mm=seqMinmax();
         return std::tuple<T,T,T>(mm.first,mm.second,mm.second-mm.first);
     }
-    T min() {
+    T seqMin() {
         T mn=*data;
         for (size_t i=0; i<size; i++)
             if(data[i]<mn) mn=data[i];
         return mn;
     }
-    T max() {
+    T seqMax() {
         T mx=*data;
         for (size_t i=0; i<size; i++)
             if(data[i]>mx) mx=data[i];
         return mx;
     }
-    T avg() {
-        return sum()/(T)size;
+    
+    std::pair<T,T>minmax() {
+        return ThreadedCalc(*this).minmax();
     }
+    std::tuple<T,T,T>minmaxdiff() {
+        auto mm=minmax();
+        return std::tuple<T,T,T>(mm.first,mm.second,abs(mm.second-mm.first));
+    }
+   
+    T min() {   return ThreadedCalc(*this).min();    }
+    T max() {   return ThreadedCalc(*this).max();    }
+    T avg()   {   return sum()/(T)size;  }
     T diff() {
         auto mm=minmax();
-        return mm.first - mm.second;
+        return abs( mm.first - mm.second );
     }
     Vect scale(T from=0, T to=1) {
         auto mmd=minmaxdiff();
@@ -267,7 +429,7 @@ public:
         return *this;
     }
     Vect norm() {
-        auto mmd=minmaxdiff();
+        auto mmd=minmaxdiff(); 
         auto mn=std::get<0>(mmd), df=std::get<2>(mmd);
         if(df)
             for (auto &d:*this)
@@ -279,7 +441,7 @@ public:
         return *this;
     }
     Vect sequence(T from, T to) {
-        assert(!(from>to) && "sequence error: from > to");
+        assert(from<to && "sequence error: from > to");
         if(size) {
             T inc=(T)(to-from)/(T)size;
             for (auto &d:*this) d = inc * (_index++);
@@ -328,7 +490,7 @@ public:
         for (auto &d:*this) d=lambda();
         return *this;
     }
-    Vect func(Lambda lambda) { // non mutable -> return a copy applying func
+    Vect seqFunc(Lambda lambda) { // non mutable -> return a copy applying func
         Vect v(*this);
         for (auto &d:v) d=lambda(d);
         return v;
@@ -338,23 +500,13 @@ public:
         for (auto &d:v) d=lambda();
         return v;
     }
-    
-    
-    // MT methods
-    Vect mtFunc(std::function<T(T)> const& lambda) { // multithreading func, usage: mtFunc(func) / T func(T)
+    Vect func(Lambda lambda) { // non mutable -> aply on copy
         Vect v(*this);
-        ThreadedCalc tc(v, lambda);
+        ThreadedCalc(v).apply(lambda);
         return v;
     }
-    Vect mtApply(std::function<T(T)> const& lambda) { // multithreading apply, usage: mtFunc(func) / T func(T)
-        ThreadedCalc tc(*this, lambda);
-        return *this;
-    }
-    T sum() { // multithreading func, usage: mtFunc(funcNoArgs), v.mtSum()!=v.sum() due to precission error
-        ThreadedCalc tc(*this);
-        return tc.runSum(*this);
-    }
    
+    T sum() {  return ThreadedCalc(*this).sum();  }
     
     Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda conditional expr.
         Vect v;
@@ -405,6 +557,10 @@ public:
         dealloc();
         size=realSize=0;
     }
+    Vect zero() {
+        memset(data, 0, sizeof(T) * size);
+        return *this;
+    }
     T erase(size_t ix) { // return removed item
         assert(ix>=0 && ix<size);
         T c=data[ix];
@@ -421,6 +577,9 @@ public:
         for (size_t i=0; i<size; i++)
             if (c==data[i]) return i;
         return -1;
+    }
+    size_t mtLocate(T c) {
+        return ThreadedCalc(*this).locate(c);
     }
     size_t bsearch(T c) { //  binary search -> must be sorted
         auto ret = std::bsearch(&c, begin(), size, sizeof(T),
@@ -473,9 +632,10 @@ public:
     // boolean,
     bool operator==(const Vect &other) { // vect==vect
         bool eq = (size==other.size);
+        size_t itemNE=0;
         if(eq)
             for (size_t i = 0; i < size; i++)
-                if (data[i] != other.data[i]) { eq=false; break; }
+                if (data[i] != other.data[i]) { eq=false; itemNE=i; break; }
         return eq;
     }
     bool operator==(const T c) { // vect == scalar, true if all ==
@@ -523,28 +683,24 @@ public:
     
     // Vect op constant
     Vect operator+(const T &c) {
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] + c;
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(c, opADD);
     }
     Vect operator-(const T &c) {
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] - c;
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(c, opSUB);
     }
     Vect operator*(const T &c) {
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] * c;
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(c, opMUL);
     }
     Vect operator/(const T &c) {
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] / c;
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(c, opDIV);
+    }
+    Vect operator^(const T &c) {
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(c, opPOW);
     }
     
     // Vect (+-*/)= const<T>
@@ -567,30 +723,61 @@ public:
         return *this;
     }
     
+    // mt operators
+    Vect operator|(const Vect &other) { // mt +
+        assert(size==other.size);
+        ThreadedCalc tc(size);
+        return tc.MToper(*this, other, opADD);
+    }
+    Vect operator&(const Vect &other) { // mt *
+        assert(size==other.size);
+        ThreadedCalc tc(size);
+        return tc.MToper(*this, other, opMUL);
+    }
+    Vect operator||(const Vect &other) { // mt *
+        assert(size==other.size);
+        ThreadedCalc tc(size);
+        return tc.MToper(*this, other, opADD);
+    }
+    Vect operator&&(const Vect &other) { // mt /
+        assert(size==other.size);
+        ThreadedCalc tc(size);
+        return tc.MToper(*this, other, opMUL);
+    }
+    Vect MToper(const Vect &other, Operator op) {
+        assert(size==other.size);
+        ThreadedCalc tc(size);
+        return tc.MToper(*this, other, op);
+    }
+    
     
     // Vect op(+-*/) Vect
     
     Vect operator+(const Vect &other) {
+        assert(size==other.size);
         Vect v(size);
-        for (size_t i = 0; i < std::min(size, other.size); i++)
+        for (size_t i = 0; i < size; i++)
             v.data[i] = data[i] + other.data[i];
         return v;
     }
     Vect operator-(const Vect &other) {
+        assert(size==other.size);
         Vect v(size);
-        for (size_t i = 0; i < std::min(size, other.size); i++)
+        for (size_t i = 0; i < size; i++)
             v.data[i] = data[i] - other.data[i];
         return v;
     }
     Vect operator*(const Vect &other) {
+        assert(size==other.size);
         Vect v(size);
-        for (size_t i = 0; i < std::min(size, other.size); i++)
+        for (size_t i = 0; i < size; i++)
             v.data[i] = data[i] * other.data[i];
         return v;
     }
     Vect operator/(const Vect &other) {
+        assert(size==other.size);
         Vect v(size);
-        for (size_t i = 0; i < std::min(size, other.size); i++)
+        for (size_t i = 0; i < size; i++)
             v.data[i] = data[i] / other.data[i];
         return v;
     }
