@@ -51,7 +51,6 @@ public:
         Vect*vect=nullptr;
         
         ThreadedCalc(Vect&v) : vect(&v) {  init(v.size);  }
-       
         ThreadedCalc(Vect&v, std::function<T()> const& lambda) : vect(&v) {
             init(v.size);
             apply(lambda);
@@ -115,23 +114,40 @@ public:
             return kahanSum(thValues, 0, nthreads);
         }
         
-        Vect evaluate(const Vect &v1, const Vect &v2, Operator op) { //  ratio 1.2 improvement w/8 threads
-            assert(v1.size==v2.size);
-            Vect v(v1.size);
+        Vect evaluate(const Vect &other, Operator op) { //  ratio 1.2 improvement w/8 threads
+            assert(vect->size==other.size);
+            Vect v(other.size);
             
             for (int t=0; t<nthreads; t++) {
-                thds[t] = std::thread([this, &v, &v1, &v2, t, op]()   {
+                thds[t] = std::thread([this, &v, &other, t, op]()   {
                     switch (op) {
-                        case opADD: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] + v2[i];   break;
-                        case opSUB: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] - v2[i];   break;
-                        case opMUL: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] * v2[i];   break;
-                        case opDIV: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=v1[i] / v2[i];   break;
-                        case opPOW: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=pow(v1[i], v2[i]);   break;
+                        case opADD: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=vect->data[i] + other[i];   break;
+                        case opSUB: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=vect->data[i] - other[i];   break;
+                        case opMUL: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=vect->data[i] * other[i];   break;
+                        case opDIV: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=vect->data[i] / other[i];   break;
+                        case opPOW: for (auto i=ranges[t]; i<ranges[t+1]; i++)  v[i]=pow(vect->data[i], other[i]);   break;
                     }
                 });
             }
             joinAll();
             return v;
+        }
+        Vect evaluateMutable(const Vect &other, Operator op) { //  ratio 1.2 improvement w/8 threads
+            assert(vect->size==other.size);
+            
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, &other, t, op]()   {
+                    switch (op) {
+                        case opADD: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i] += other[i];   break;
+                        case opSUB: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i] -= other[i];   break;
+                        case opMUL: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i] *= other[i];   break;
+                        case opDIV: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i] /= other[i];   break;
+                        case opPOW: for (auto i=ranges[t]; i<ranges[t+1]; i++)  vect->data[i]=pow(vect->data[i], other[i]);   break;
+                    }
+                });
+            }
+            joinAll();
+            return *vect;
         }
         Vect evaluate(const T c, Operator op) { //  ratio 1.2 improvement w/8 threads
             
@@ -706,48 +722,29 @@ public:
     // Vect (+-*/)= const<T>
     
     Vect &operator+=(const T &c) {
-        for (auto &d:*this) d += c;
+        if(c!=0) ThreadedCalc(*this).evaluate(c, opADD);
         return *this;
     }
     Vect &operator-=(const T &c) {
-        for (auto &d:*this) d -= c;
+        if(c!=0) ThreadedCalc(*this).evaluate(c, opSUB);
         return *this;
     }
     Vect &operator*=(const T &c) {
-        for (auto &d:*this) d *= c;
+        if(c!=0) ThreadedCalc(*this).evaluate(c, opMUL);
         return *this;
     }
     Vect &operator/=(const T &c) {
-        if(c!=0)
-            for (auto &d:*this) d /= c;
+        if(c!=0) ThreadedCalc(*this).evaluate(c, opDIV);
         return *this;
     }
     
-    // mt operators
-    Vect operator|(const Vect &other) { // mt +
-        assert(size==other.size);
-        ThreadedCalc tc(size);
-        return tc.MToper(*this, other, opADD);
+    Vect operator|(const Vect &other) { // union
     }
-    Vect operator&(const Vect &other) { // mt *
-        assert(size==other.size);
-        ThreadedCalc tc(size);
-        return tc.MToper(*this, other, opMUL);
+    Vect operator&(const Vect &other) { // intersection
     }
-    Vect operator||(const Vect &other) { // mt *
-        assert(size==other.size);
-        ThreadedCalc tc(size);
-        return tc.MToper(*this, other, opADD);
+    Vect operator||(const Vect &other) { //
     }
-    Vect operator&&(const Vect &other) { // mt /
-        assert(size==other.size);
-        ThreadedCalc tc(size);
-        return tc.MToper(*this, other, opMUL);
-    }
-    Vect MToper(const Vect &other, Operator op) {
-        assert(size==other.size);
-        ThreadedCalc tc(size);
-        return tc.MToper(*this, other, op);
+    Vect operator&&(const Vect &other) {
     }
     
     
@@ -755,31 +752,23 @@ public:
     
     Vect operator+(const Vect &other) {
         assert(size==other.size);
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] + other.data[i];
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(other, opADD);
     }
     Vect operator-(const Vect &other) {
         assert(size==other.size);
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] - other.data[i];
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(other, opSUB);
     }
     Vect operator*(const Vect &other) {
         assert(size==other.size);
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] * other.data[i];
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(other, opMUL);
     }
     Vect operator/(const Vect &other) {
         assert(size==other.size);
-        Vect v(size);
-        for (size_t i = 0; i < size; i++)
-            v.data[i] = data[i] / other.data[i];
-        return v;
+        Vect v(*this);
+        return ThreadedCalc(v).evaluate(other, opDIV);
     }
     
     // Vect (+-*/)= Vect

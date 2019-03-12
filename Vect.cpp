@@ -38,7 +38,7 @@ void testVect() {
     Timer timer;
     
     VectReal vinit(5, new real[5]{0,1,2,3,4});
-    VectReal v0, v1(1000), v2(1000);
+    VectReal v0, v1(1000), v2(1000), v5(v1), vxx(0, M_PI, 1e-4), vsin(0, M_PI, 1e-4, sin);
     auto v4=v1;
     puts("ok");
     
@@ -54,6 +54,27 @@ void testVect() {
         assert(v1*5 == v1/(1./5.));
         assert((v1^2) == v1*v1);
         assert((v1^3) == v1*v1*v1);
+        
+        v+=3;
+        assert(v == v1);
+        v-=3;
+        assert(v.sum()==0);
+        v=v1;  v1*=2;
+        assert(v1 == v*2);
+        v=v1;  v1/=2;
+        assert(v1 == v/2);
+        
+        v=v1; v+=v1;
+        assert(v == v1*2);
+        
+        v=v1; v-=v1;
+        assert(v.sum() == 0);
+        
+        v=v1; v*=v1;
+        assert(v == v1*v1);
+        
+        v=v1; v/=v1;
+        assert(v == v1/v1);
         
         printf("done for size %.0f in %ld ms\n", n, timer.lap());
     }
