@@ -55,8 +55,16 @@ void testVect() {
         assert((v1^2) == v1*v1);
         assert((v1^3) == v1*v1*v1);
         
+        v=0; // set all values to zero
+        assert(v==0);
+        
+        v=2; // set all values to 2
+        assert(v==2);
+        
+        v=0;
+        
         v+=3;
-        assert(v == v1);
+        assert(v == v1 && v == 3);
         v-=3;
         assert(v.sum()==0);
         v=v1;  v1*=2;
@@ -76,10 +84,28 @@ void testVect() {
         v=v1; v/=v1;
         assert(v == v1/v1);
         
+        auto vunion = v1 | v;
+        assert((vunion == (v1 << v)) && (vunion.length() == v1.length()));
+        auto vinter = v & v1;
+        for (auto d:vinter)
+            assert(v.bsearch(d) != -1 && v1.bsearch(d) != -1);
+        
         printf("done for size %.0f in %ld ms\n", n, timer.lap());
     }
-   
-    puts("testing sequence / lambda constructor...");
+    
+    printf("testing vector append / sub / join / cmp / rnd...");
+    {
+        size_t n=2000, n1=10000;
+        auto v=VectReal::rnd(n1), v1=VectReal::rnd(n), v1tmp=v1, v2=(v1<<v);
+        
+        assert(v2(n, n+n1) == v); // sub vector test
+        assert(v2==v1);
+        assert(!(v2!=v1));
+        assert((v1tmp|v) == v2); // join test |
+    }
+    puts("ok");
+    
+    printf("testing sequence / lambda constructor...");
     timer.start();
     for (int ic=0; ic<100; ic++)    {
         VectReal    vs(0, M_PI, 0.001),
@@ -109,7 +135,7 @@ void testVect() {
         printf("generating data st...");
         VectReal v=VectReal::stSeq(0, 1, inc);
         printf("done in %ld ms\n", ls=timer.lap());
-
+        
         printf("generating data mt...");
         timer.start();
         VectReal vm(0, 1, inc);
@@ -123,7 +149,7 @@ void testVect() {
         for (size_t i=v.count()-5; i<v.count(); i++) assert(v.locate(v[i])!=-1);
         printf("done in %ld ms, now in mt...", ls=timer.lap());
         timer.start();
-        for (size_t i=v.count()-5; i<v.count(); i++) assert(v.mtLocate(v[i])!=-1);
+        for (size_t i=v.count()-5; i<v.count(); i++) assert(v.locate(v[i])!=-1);
         lm=timer.lap();
         printf("done in %ld ms, rate st/mt = %.1f ", lm, (double)ls/lm );
         assert(v==vm);
@@ -180,7 +206,7 @@ void testVect() {
     }
     puts("ok");
     
-   
+    
     
     puts("testing init vector, iterator...");
     {
@@ -209,7 +235,7 @@ void testVect() {
     }
     puts("ok");
     
-   
+    
     // shuffle
     cout << "shuffle test...";
     timer.start();
@@ -254,26 +280,29 @@ void testVect() {
         cout << " ok\n";
     }
     
-    cout << "testing append...";
-    for (int ic=0; ic<200; ic++) {
-        v0.clear();
-        int n=100000; // append test
-        real rs=0;
-        for (int i=0; i<n; i++) { v0 << i; rs+=i; }
-        v0.fit(); // set memory to size
-        assert(v0.sum()==rs && "append failure");
+    {
+        printf("testing append...");
+        for (int ic=0; ic<200; ic++) {
+            v0.clear();
+            int n=100000; // append test
+            real rs=0;
+            for (int i=0; i<n; i++) { v0 << i; rs+=i; }
+            v0.fit(); // set memory to size
+            assert(v0.sum()==rs && "append failure");
+        }
+       
+        puts("ok");
     }
-    cout << "ok\n";
     
     cout << "testing erase()...";
     for (int i=0; i<80; i++) {
         const int ns=2000, nr=900;
         VectReal v = VectReal::seq(ns), v0=VectReal::rnd(nr);
         
-        for (int j=0; j<ns; j++)
-            assert( v.locate( v.erase(rand() % v.count()) )==-1 );
+        for (int j=0; j<ns; j++) // locate is mt and will last longer than st version
+            assert( v.seqlocate( v.erase(rand() % v.count()) )==-1 );
         for (int j=0; j<nr; j++)
-            v0.locate( v0.erase(rand() % v0.count()) ); // possible dups (random)
+            v0.seqlocate( v0.erase(rand() % v0.count()) ); // possible dups (random)
         
         assert(v.count()==0 && v0.count()==0);
     }
@@ -349,8 +378,10 @@ void testVect() {
     vseq = vseq1 * 0.01;
     
     // subvector (from, to)
-    auto vsub = v0.sub(10,20);
+    auto vsub = v0(10,20);
     assert(vsub.length()==10 && "sub failure");
+    for (auto d: vsub)
+        assert(v0.locate(d)>=10);
     
     // filter
     auto fsel = [](real x) -> bool { return x>0.5 && x<0.7; };

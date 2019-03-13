@@ -50,6 +50,9 @@ public:
         T *maxv, *minv;
         Vect*vect=nullptr;
         
+        bool found=false;
+        size_t res=-1;
+        
         ThreadedCalc(Vect&v) : vect(&v) {  init(v.size);  }
         ThreadedCalc(Vect&v, std::function<T()> const& lambda) : vect(&v) {
             init(v.size);
@@ -102,7 +105,26 @@ public:
             }
             joinAll();
         }
-        
+        void scale( T from, T to, T min, T diff) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, from, to, min, diff]() {
+                    auto pdf=(to-from);
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        vect->data[i] = from + ((vect->data[i]-min) / diff) * pdf;
+                });
+            }
+            joinAll();
+        }
+        Vect norm(T min, T diff) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, min, diff]() {
+                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
+                        vect->data[i] = (vect->data[i]-min) / diff;
+                });
+            }
+            joinAll();
+            return *vect;
+        }
         T sum() {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t]()   {
@@ -191,18 +213,42 @@ public:
             return std::pair<T,T>(resmin, resmax);
         }
         size_t locate(const T c) {
-            assert(vect->size>0);
-            volatile size_t res=-1;
-            volatile bool found=false;
+            found=false;  res=-1;
             
             for (int t=0; t<nthreads; t++) {
-                thds[t] = std::thread([this, &res, t, c, &found]()   {
+                thds[t] = std::thread([this, t, c]()   {
                     for (auto i=ranges[t]; i<ranges[t+1] && !found; i++)
                         if (vect->data[i] == c) { res=i; found=true; break; };
                 });
             }
             joinAll();
             return res;
+        }
+        bool eq(const Vect &other) {
+            found = vect->size == other.size; // read found as 'eq'
+            
+            if(found) {
+                for (int t=0; t<nthreads; t++) {
+                    thds[t] = std::thread([this, t, &other]()   {
+                        for (auto i=ranges[t]; i<ranges[t+1] && found; i++)
+                            if (vect->data[i] != other.data[i]) { found=false; break; };
+                    });
+                }
+                joinAll();
+            }
+            return found; // eq
+        }
+        bool eq(const T c) {
+            found = true; // read found as 'eq'
+            
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, c]()   {
+                    for (auto i=ranges[t]; i<ranges[t+1] && found; i++)
+                        if (vect->data[i] != c) { found=false; break; };
+                });
+            }
+            joinAll();
+            return found; // eq
         }
         void seq() {
             for (int t=0; t<nthreads; t++) {
@@ -302,7 +348,7 @@ public:
     
     ~Vect() { dealloc(); }
     
-    static Vect rnd(int size) { // norm random
+    static Vect rnd(size_t size) { // norm random
         assert(size>0);
         Vect v(size);
         ThreadedCalc(v, []() -> T{ return (T)rand()/(T)RAND_MAX; });
@@ -366,11 +412,16 @@ public:
         for (auto const d:*this) oss << d << ",";
         return oss.str();
     }
+    std::string debug(size_t n=10) {
+        std::ostringstream oss;
+        for (auto i=0; i<n; i++) oss << data[i] << ",";
+        return oss.str();
+    }
     size_t length() {   return size;    }
     size_t count() {    return size;    }
     
     Vect sub(size_t from, size_t to) { // subvector from,to
-        assert(!(from>to || from>=size || to>=size) && "sub: from > to or range error");
+        assert(from<to && from<size && to<=size && "sub: from > to or range error");
         auto sz=to-from;
         Vect res(sz);
         for (auto i=from; i<to; i++)
@@ -389,35 +440,7 @@ public:
     void rand01() {
         ThreadedCalc(*this, []() -> T { return (T)rand()/(T)RAND_MAX; });
     }
-    T seqSum() { // don't use as it generates precission errors -> apply kahan algo.
-        T s=0;
-        for (auto d:*this) s+=d;
-        return s;
-    }
-    std::pair<T,T>seqMinmax() {
-        T mx=*data, mn=*data;
-        for (size_t i=0; i<size; i++) {
-            if(data[i]>mx) mx=data[i];
-            if(data[i]<mn) mn=data[i];
-        }
-        return std::pair<T,T>(mn,mx);
-    }
-    std::tuple<T,T,T>seqMinmaxdiff() {
-        auto mm=seqMinmax();
-        return std::tuple<T,T,T>(mm.first,mm.second,mm.second-mm.first);
-    }
-    T seqMin() {
-        T mn=*data;
-        for (size_t i=0; i<size; i++)
-            if(data[i]<mn) mn=data[i];
-        return mn;
-    }
-    T seqMax() {
-        T mx=*data;
-        for (size_t i=0; i<size; i++)
-            if(data[i]>mx) mx=data[i];
-        return mx;
-    }
+    
     
     std::pair<T,T>minmax() {
         return ThreadedCalc(*this).minmax();
@@ -435,25 +458,19 @@ public:
         return abs( mm.first - mm.second );
     }
     Vect scale(T from=0, T to=1) {
+        assert(from<to);
         auto mmd=minmaxdiff();
-        auto mn=std::get<0>(mmd), df=std::get<2>(mmd);
-        auto pdf=to-from;
+        auto min=std::get<0>(mmd), diff=std::get<2>(mmd);
         
-        if(df)
-            for (auto &d:*this)
-                d = from + ((d-mn) / df) * pdf;
-        return *this;
+        return (diff) ? ThreadedCalc(*this).scale(from, to, min, diff) : *this;
     }
     Vect norm() {
         auto mmd=minmaxdiff(); 
         auto mn=std::get<0>(mmd), df=std::get<2>(mmd);
-        if(df)
-            for (auto &d:*this)
-                d = (d-mn) / df;
-        return *this;
+        return (df) ? ThreadedCalc(*this).norm(mn, df) : *this;
     }
     Vect fill(T value) {
-        for (auto &d:*this) d = value;
+        std::fill(begin(), end(), value);
         return *this;
     }
     Vect sequence(T from, T to) {
@@ -542,32 +559,34 @@ public:
     
     // append, void return as Vect return -> very bad performnce
     // so v0 << v1 << v2 is v0<<v1; v0<<v2;
-    void operator << (const T c) {
-        append(c);
+    Vect& operator << (const T c) {
+        return append(c);
     }
     void operator >> (T &c) {
         assert(_index<size);
         c=data[_index++];
     }
-    void operator << (const Vect &other) {
+    Vect& operator << (const Vect &other) {
         return append(other);
     }
-    void append(const T c) {
+    Vect& append(const T c) {
         if ( size >= realSize ) {
             realSize+=nchunk;
             data = (T*)realloc(data, realSize*sizeof(T));
         }
         data[size++]=c;
+        return *this;
     }
-    void append(const Vect &other) {
+    Vect& append(const Vect &other) {
         auto os=other.size;
         if ( size+os >= realSize ) {
             realSize=size+os;
             data = (T*)realloc(data, realSize*sizeof(T));
         }
-        for (int i=0; i<os; i++)
-            data[i+size]=other.data[i];
+        memcpy(data+size, other.data, os*sizeof(T));
+//        for (int i=0; i<os; i++) data[i+size]=other.data[i];
         size+=os;
+        return *this;
     }
     void clear() {
         dealloc();
@@ -585,23 +604,19 @@ public:
         size--;
         return c;
     }
-    void fit() { // fit current memory to size
+    Vect& fit() { // fit current memory to size
         if (size)
             resize(size);
+        return *this;
     }
-    size_t locate(T c) {
-        for (size_t i=0; i<size; i++)
-            if (c==data[i]) return i;
-        return -1;
+    
+    size_t locate(T c) { // use locate on big enough vectors
+        return (size < 10000) ? seqlocate(c) : ThreadedCalc(*this).locate(c);
     }
-    size_t mtLocate(T c) {
-        return ThreadedCalc(*this).locate(c);
-    }
-    size_t bsearch(T c) { //  binary search -> must be sorted
+    size_t bsearch(T c) { //  binary search -> must be sorted, return index if found, -1 if not
         auto ret = std::bsearch(&c, begin(), size, sizeof(T),
                                 [](const void*a, const void*b) ->int { return (int)(*((T*)a) - *((T*)b));});
-        if(ret==nullptr) return -1;
-        return (T*)ret-begin();
+        return (ret==nullptr) ? -1 : (T*)ret-begin();
     }
     
     
@@ -614,7 +629,7 @@ public:
         return *this;
     }
     Vect &operator=(const T c) { // asignment
-        for (auto &d:*this) d=c;
+        std::fill(begin(), end(), c); //  for (auto &d:*this) d=c;
         return *this;
     }
     
@@ -644,15 +659,13 @@ public:
             if (lambda(d)) v << d;
         return v;
     }
+    Vect operator()(size_t from, size_t to) { // sub vector
+        return sub(from, to);
+    }
     
     // boolean,
     bool operator==(const Vect &other) { // vect==vect
-        bool eq = (size==other.size);
-        size_t itemNE=0;
-        if(eq)
-            for (size_t i = 0; i < size; i++)
-                if (data[i] != other.data[i]) { eq=false; itemNE=i; break; }
-        return eq;
+        return ThreadedCalc(*this).eq(other);
     }
     bool operator==(const T c) { // vect == scalar, true if all ==
         bool eq=true;
@@ -660,12 +673,7 @@ public:
         return eq;
     }
     bool operator!=(const Vect &other) {
-        bool eq = (size==other.size);
-        if(eq) {
-            for (size_t i = 0; i < size; i++)
-                if (data[i] != other.data[i]) break;
-        }
-        return eq;
+        return ! (*this==other);
     }
     bool operator!=(const T c) { // vect != scalar
         bool res=true;
@@ -738,10 +746,20 @@ public:
         return *this;
     }
     
-    Vect operator|(const Vect &other) { // union
+    Vect operator|(const Vect &other) { // join *this and other
+        Vect v(size + other.size); // Vect v = *this << other
+        memcpy(v.data,      data,       size*sizeof(T)); // v=*this
+        memcpy(v.data+size, other.data, other.size*sizeof(T)); // append other
+        return v;
     }
-    Vect operator&(const Vect &other) { // intersection
+    Vect operator&(Vect &other) { // intersection
+        Vect v(size + other.size);
+        this->sort(); other.sort();
+        auto n = std::set_intersection(begin(), end(), other.begin(), other.end(), v.begin()) - v.begin();
+        v.resize(n);
+        return v;
     }
+    
     Vect operator||(const Vect &other) { //
     }
     Vect operator&&(const Vect &other) {
@@ -774,27 +792,27 @@ public:
     // Vect (+-*/)= Vect
     
     Vect &operator+=(const Vect &other) {
-        for (size_t i = 0; i < std::min(size, other.size); i++)
-            data[i] += other.data[i];
+        assert(size==other.size);
+        ThreadedCalc(*this).evaluateMutable(other, opADD);
         return *this;
     }
     Vect &operator-=(const Vect &other) {
-        for (size_t i = 0; i < std::min(size, other.size); i++)
-            data[i] -= other.data[i];
+        assert(size==other.size);
+        ThreadedCalc(*this).evaluateMutable(other, opSUB);
         return *this;
     }
     Vect &operator*=(const Vect &other) {
-        for (size_t i = 0; i < std::min(size, other.size); i++)
-            data[i] *= other.data[i];
+        assert(size==other.size);
+        ThreadedCalc(*this).evaluateMutable(other, opMUL);
         return *this;
     }
     Vect &operator/=(const Vect &other) {
-        for (size_t i = 0; i < std::min(size, other.size); i++)
-            data[i] /= other.data[i];
+        assert(size==other.size);
+        ThreadedCalc(*this).evaluateMutable(other, opDIV);
         return *this;
     }
     
-    // ++, --
+    // ++, -- -> works on _index
     size_t &operator++() {
         return ++_index;
     }
@@ -807,6 +825,51 @@ public:
     }
     size_t operator--(int) {
         return _index--;
+    }
+    
+    // single threaded methods
+    
+    T seqSum() { // don't use as it generates precission errors -> apply kahan algo.
+        T s=0;
+        for (auto d:*this) s+=d;
+        return s;
+    }
+    std::pair<T,T>seqMinmax() {
+        T mx=*data, mn=*data;
+        for (size_t i=0; i<size; i++) {
+            if(data[i]>mx) mx=data[i];
+            if(data[i]<mn) mn=data[i];
+        }
+        return std::pair<T,T>(mn,mx);
+    }
+    std::tuple<T,T,T>seqMinmaxdiff() {
+        auto mm=seqMinmax();
+        return std::tuple<T,T,T>(mm.first,mm.second,mm.second-mm.first);
+    }
+    T seqMin() {
+        T mn=*data;
+        for (size_t i=0; i<size; i++)
+            if(data[i]<mn) mn=data[i];
+        return mn;
+    }
+    T seqMax() {
+        T mx=*data;
+        for (size_t i=0; i<size; i++)
+            if(data[i]>mx) mx=data[i];
+        return mx;
+    }
+    size_t seqlocate(T c) {
+        for (size_t i=0; i<size; i++)
+            if (c==data[i]) return i;
+        return -1;
+    }
+    bool seqEQ(const Vect&other) {
+        bool eq = (size==other.size);
+        size_t itemNE=0;
+        if(eq)
+            for (size_t i = 0; i < size; i++)
+                if (data[i] != other.data[i]) { eq=false; itemNE=i; break; }
+        return eq;
     }
 };
 
