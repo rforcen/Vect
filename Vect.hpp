@@ -375,7 +375,7 @@ public:
         assert(size>0);
         Vect v(size);
         for (auto &d:v) d=(T)rand()/(T)RAND_MAX;
-        /* can't beat single theaded solution
+        /* with mt can't beat single theaded solution
         if (v.size<szSingle)  for (auto &d:v) d=(T)rand()/(T)RAND_MAX;
         else                  ThreadedCalc(v).rnd(); //, []() -> T{ return (T)rand()/(T)RAND_MAX; });
          */
@@ -508,18 +508,18 @@ public:
         return r;
     }
     
-    Vect sort(bool increasing=true) {
+    Vect& sort(bool increasing=true) {
         if (increasing)
             std::sort(begin(), end(), [](T a, T b){ return a<b; });
         else
             std::sort(begin(), end(), [](T a, T b){ return b<a; });
         return *this;
     }
-    Vect sortInv() {
+    Vect& sortInv() {
         std::sort(begin(), end(), [](T a, T b){ return b<a; });
         return *this;
     }
-    Vect shuffle() {
+    Vect& shuffle() {
         if (size > 1) {
             for (int i=0; i<size; i++)
                 std::swap<T>(data[i], data[(rand() % (i + 1))]);
@@ -528,31 +528,30 @@ public:
     }
    
     
-    Vect apply(Lambda lambda) { // apply labda func -> mutable, usage: v.apply(sin)
-        for (auto &d:*this) d=lambda(d);
+    Vect& apply(Lambda lambda) { // apply labda func -> mutable, usage: v.apply(sin)
+        if (size<szSingle) for (auto &d:*this) d=lambda(d);
+        else ThreadedCalc(*this).apply(lambda);
         return *this;
     }
-    Vect apply(std::function<T()> const& lambda) { // usage: v.apply(funcNoArgs)
-        for (auto &d:*this) d=lambda();
+    Vect& apply(std::function<T()> const& lambda) { // usage: v.apply(funcNoArgs)
+        if (size<szSingle) for (auto &d:*this) d=lambda();
+        else ThreadedCalc(*this).apply(lambda);
         return *this;
-    }
-    Vect seqFunc(Lambda lambda) { // non mutable -> return a copy applying func
-        Vect v(*this);
-        for (auto &d:v) d=lambda(d);
-        return v;
     }
     Vect func(std::function<T()> const& lambda) { // usage: func(funcNoArgs)
         Vect v(*this);
-        for (auto &d:v) d=lambda();
+        if (size<szSingle) for (auto &d:v) d=lambda();
+        else ThreadedCalc(v).apply(lambda);
         return v;
     }
     Vect func(Lambda lambda) { // non mutable -> aply on copy
         Vect v(*this);
-        ThreadedCalc(v).apply(lambda);
+        if (size<szSingle) for (auto &d:v) d=lambda(d);
+        else ThreadedCalc(v).apply(lambda);
         return v;
     }
    
-    T sum() {  return ThreadedCalc(*this).sum();  }
+    T sum() {  return (size<szSingle) ? stsum() : ThreadedCalc(*this).sum();  }
     
     Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda conditional expr.
         Vect v;
@@ -566,6 +565,7 @@ public:
         return res;
     }
     
+    // iterator support
     T*begin() { _index=0; return data; }
     T*end() { return data+size; }
     size_t incIndex() { return _index++; } // for (auto d:vect) v1[vect.incIndex()]=d;
@@ -599,15 +599,16 @@ public:
         size+=os;
         return *this;
     }
-    void clear() {
+    Vect& clear() {
         dealloc();
         size=realSize=0;
+        return *this;
     }
-    Vect zero() {
+    Vect& zero() {
         memset(data, 0, sizeof(T) * size);
         return *this;
     }
-    Vect one() {
+    Vect& one() {
         for (auto &d:*this) d=(T)1;
         return *this;
     }
@@ -635,11 +636,11 @@ public:
     
     
     Vect &operator=(const Vect &other) { // asignment
-        // check for self-assignment
-        if (&other == this) return *this;
+        if (&other == this) return *this; // check for self-assignment to avoid delloc problems
         
         if (size != other.size) resize(other.size);
-        std::copy(&other.data[0], &other.data[0] + size, &data[0]);
+        memcpy(data, other.data, size * sizeof(T));
+//        std::copy(&other.data[0], &other.data[0] + size, &data[0]);
         return *this;
     }
     Vect &operator=(const T c) { // asignment
@@ -650,16 +651,16 @@ public:
     
     // index mutator
     inline T& operator[](size_t index) {
-        assert(!(index<0 || index>=size) && "Vect: index error");
+        assert(index>=0 && index<size && "Vect: index error");
         return data[index];
     }
     // index accessor
     inline const T& operator[](size_t index) const {
-        assert(!(index<0 || index>=size) && "Vect: index error");
+        assert(index>=0 && index<size  && "Vect: index error");
         return data[index];
     };
     inline const T& operator[](const Vect&v) const { // vect[v] is vect[v._index]
-        assert(!(v._index<0 || v._index>=size) && "Vect: index error");
+        assert(v._index>=0 && v._index<size && "Vect: index error");
         return data[v._index];
     };
     Vect operator[](VectIndex ixs) const { // index vect by vector of indexes
@@ -799,9 +800,11 @@ public:
         return v;
     }
     
-    Vect operator||(const Vect &other) { //
+    Vect& operator||(const Vect &other) { // union?
+        return *this;
     }
-    Vect operator&&(const Vect &other) {
+    Vect& operator&&(const Vect &other) {
+        return *this;
     }
     
     
@@ -873,10 +876,10 @@ public:
     
     // single threaded methods
     
-    T seqSum() { // don't use as it generates precission errors -> apply kahan algo.
+    T seqSum_dont_use() { // don't use as it generates precission errors -> apply kahan algo.
         T s=0;
         for (auto d:*this) s+=d;
-        return s;
+        return s; // instead use  return kahanSum(data, 0, size);
     }
     std::pair<T,T>stminmax() {
         T mx=*data, mn=*data;
@@ -956,6 +959,11 @@ public:
     
     void rnd() {
         for (auto &d:*this) d=(T)rand()/(T)RAND_MAX;
+    }
+    Vect stfunc(Lambda lambda) { // non mutable -> return a copy applying func
+        Vect v(*this);
+        for (auto &d:v) d=lambda(d);
+        return v;
     }
 };
 

@@ -307,7 +307,7 @@ void testVect() {
         cout << "mt done in " << timer.lap() << "ms, now st...";
         
         timer.start();
-        auto vff=vmt.seqFunc(foo); // st version... see the timing difference?
+        auto vff=vmt.stfunc(foo); // st version... see the timing difference?
         assert(vff==vmtf);
         
         cout << "done in " << timer.lap() << "ms\nnow mtSum...";
