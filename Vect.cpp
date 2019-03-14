@@ -31,6 +31,8 @@ public:
 void testVect() {
     puts("test started\n");
     
+   
+    
     printf("testing creators...");
     typedef double real;
     typedef Vect<real> VectReal;
@@ -41,6 +43,28 @@ void testVect() {
     VectReal v0, v1(1000), v2(1000), v5(v1), vxx(0, M_PI, 1e-4), vsin(0, M_PI, 1e-4, sin);
     auto v4=v1;
     puts("ok");
+    
+    printf("single vs. multithead sweet point...");
+    {
+        long ts, tm;
+        size_t n=1e8;
+        
+        printf("for %ld values, now st...", n);
+        timer.start();        auto vs=VectReal::rnd(n);        ts=timer.lap();
+        timer.start();        auto vm=VectReal::rnd(n);        tm=timer.lap();
+        printf("lap for rnd init st:%ld ms, mt:%ld ms\n", ts, tm);
+        vs=vs;
+        timer.start();        bool bs=vs.stEQ(vs);        ts=timer.lap();
+        timer.start();        bool bm=vm==vm;             tm=timer.lap();
+        printf("lap for == worst case init st:%ld ms, mt:%ld ms, (%d,%d)\n", ts, tm, bs, bm);
+        
+        timer.start();        auto vss=vs.stadd(vs);     ts=timer.lap();
+        timer.start();        vss=vs+vm;                 tm=timer.lap();
+        printf("lap for v+v worst case init st:%ld ms, mt:%ld ms, (%d,%d)\n", ts, tm, bs, bm);
+        
+    }
+    puts("ok");
+    
     
     printf("testing operators...");
     timer.start();
@@ -61,7 +85,27 @@ void testVect() {
         v=2; // set all values to 2
         assert(v==2);
         
+        VectReal vs(n), vb(n);
+        vs=1; vb=2;
+        assert(vs<vb);
+        assert(vs <= vb);
+        assert(vb>vs);
+        assert(vb >= vs);
+        assert(vb!=vs);
+        assert(!(vb==vs));
+        
+        { // small sized vector aritmethics
+            size_t sn=100;
+            VectReal vs1(sn), vs2(sn);
+            auto vsssum= vs1+1, _vs=vs1+vs2;
+            assert(vsssum.sum() == vsssum.length());
+            assert(_vs.sum() == 0);
+            assert(vsssum == vs1+1);
+            assert(_vs == vs1+vs2);
+        }
+        
         v=0;
+        assert(v!=1);
         
         v+=3;
         assert(v == v1 && v == 3);
@@ -117,8 +161,8 @@ void testVect() {
         // simulate graph data x-axis, y-lambda
         VectReal vx(0, M_PI, 1e-4), vy(vx, sin), vytest=vx.func(sin);
         
-        assert(vy.max() == vytest.seqMax());
-        assert(vy.min() == vytest.seqMin());
+        assert(vy.max() == vytest.stmax());
+        assert(vy.min() == vytest.stmin());
         assert(vy == vytest);
         assert(vy.norm() == vytest.norm());
         assert(vx.func(tan) == vx.func(sin) / vx.func(cos)); // tan = sin/cos
@@ -273,7 +317,7 @@ void testVect() {
         t1=timer.lap();
         cout << "done in " << t1 << "ms, now st...";
         timer.start();
-        vff.stSum();
+        vff.stsum();
         t2=timer.lap();
         cout << "done in " << t2 << "ms ratio= " << t2/t1; // ratio 5
         assert(smt == vff.sum()); //  ok due to kahan sum algo.
@@ -290,7 +334,7 @@ void testVect() {
             v0.fit(); // set memory to size
             assert(v0.sum()==rs && "append failure");
         }
-       
+        
         puts("ok");
     }
     
@@ -300,9 +344,9 @@ void testVect() {
         VectReal v = VectReal::seq(ns), v0=VectReal::rnd(nr);
         
         for (int j=0; j<ns; j++) // locate is mt and will last longer than st version
-            assert( v.seqlocate( v.erase(rand() % v.count()) )==-1 );
+            assert( v.stlocate( v.erase(rand() % v.count()) )==-1 );
         for (int j=0; j<nr; j++)
-            v0.seqlocate( v0.erase(rand() % v0.count()) ); // possible dups (random)
+            v0.stlocate( v0.erase(rand() % v0.count()) ); // possible dups (random)
         
         assert(v.count()==0 && v0.count()==0);
     }
@@ -403,7 +447,7 @@ void testVect() {
     VectReal v3(v0); // misc
     auto v6=v3.norm();
     assert( v6.filter([](real x) -> bool { return x>=1.0 && x<0.0; }).count() == 0 );
-    v6.sequence(0,5);
+    v6=VectReal::seq(5,1);
     
     // lambda apply func / sort
     v2.apply(sin).sort().apply([](real x) -> real { return x*x; });
