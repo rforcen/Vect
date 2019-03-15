@@ -83,11 +83,8 @@ public:
         void apply(Lambda lambda) {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, lambda]() {
-                    auto data=vect->data+ranges[t];
-                    for (auto i=ranges[t], to=ranges[t+1]; i<to; i++) {
-                        *data = lambda(*data);
-                        data++;
-                    }
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
+                        *d = lambda(*d);
                 });
             }
             joinAll();
@@ -95,8 +92,9 @@ public:
         void apply(T from, T to, T inc, Lambda lambda) {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, from, inc, lambda]() {
-                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
-                        vect->data[i] = lambda(from + inc * i);
+                    int i=0;
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
+                        *d = lambda(from + inc * (i++));
                 });
             }
             joinAll();
@@ -104,8 +102,8 @@ public:
         void apply( std::function<T()> const& lambda) {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, lambda]() {
-                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
-                        vect->data[i] = lambda();
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
+                        *d = lambda();
                 });
             }
             joinAll();
@@ -114,17 +112,17 @@ public:
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, from, to, min, diff]() {
                     auto pdf=(to-from);
-                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
-                        vect->data[i] = from + ((vect->data[i]-min) / diff) * pdf;
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
+                        *d = from + ((*d-min) / diff) * pdf;
                 });
             }
             joinAll();
         }
-        Vect norm(T min, T diff) {
+        Vect &norm(T min, T diff) {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, min, diff]() {
-                    for (auto i=ranges[t]; i<ranges[t+1]; i++)
-                        vect->data[i] = (vect->data[i]-min) / diff;
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
+                        *d = (*d-min) / diff;
                 });
             }
             joinAll();
@@ -140,14 +138,12 @@ public:
             
             return kahanSum(thValues, 0, nthreads);
         }
-        Vect rnd() {
+        Vect& rnd() {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t]() {
-                    auto data=vect->data+ranges[t];
-                    for (auto i=ranges[t], to=ranges[t+1]; i<to; i++) {
-                        *data = (T)rand() / (T)RAND_MAX;
-                        data++;
-                    }
+                    unsigned int seedp;
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
+                        *d = (T)rand_r(&seedp) / (T)RAND_MAX; // use reentrant version of rand
                 });
             }
             joinAll();
@@ -171,7 +167,7 @@ public:
             joinAll();
             return v;
         }
-        Vect evaluateMutable(const Vect &other, Operator op) { //  ratio 1.2 improvement w/8 threads
+        Vect& evaluateMutable(const Vect &other, Operator op) { //  ratio 1.2 improvement w/8 threads
             assert(vect->size==other.size);
             
             for (int t=0; t<nthreads; t++) {
@@ -188,7 +184,7 @@ public:
             joinAll();
             return *vect;
         }
-        Vect evaluate(const T c, Operator op) { //  ratio 1.2 improvement w/8 threads
+        Vect& evaluate(const T c, Operator op) { //  ratio 1.2 improvement w/8 threads
             
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, c, op]()   {
@@ -267,7 +263,7 @@ public:
             joinAll();
             return found; // eq
         }
-        void seq() {
+        Vect& seq() {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t]() {
                     for (auto i=ranges[t]; i<ranges[t+1]; i++)
@@ -275,8 +271,9 @@ public:
                 });
             }
             joinAll();
+            return *vect;
         }
-        void seq(T inc) {
+        Vect& seq(T inc) {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, inc]() {
                     for (auto i=ranges[t]; i<ranges[t+1]; i++)
@@ -284,9 +281,10 @@ public:
                 });
             }
             joinAll();
+            return *vect;
         }
        
-        void seq(T from, T to, T inc) {
+        Vect& seq(T from, T to, T inc) {
             for (int t=0; t<nthreads; t++) {
                 thds[t] = std::thread([this, t, from, inc]() {
                     for (auto i=ranges[t]; i<ranges[t+1]; i++)
@@ -294,6 +292,19 @@ public:
                 });
             }
             joinAll();
+            return *vect;
+        }
+        
+        Vect& shuffle() {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t]() {
+                    auto s=0u;
+                    for (auto i=ranges[t], from=i, diff=ranges[t+1]-ranges[t]; i<ranges[t+1]; i++)
+                        std::swap<T>(vect->data[i], vect->data[from + (rand_r(&s) % diff)]);
+                });
+            }
+            joinAll();
+            return *vect;
         }
         
         ~ThreadedCalc() {
@@ -343,9 +354,8 @@ public:
             memcpy(data, other.data, other.size * sizeof(T));
         }
     }
-    Vect(const size_t size, const T v[]){
-        alloc(size);
-        for (auto &d:*this) d=v[_index++];
+    Vect (const std :: initializer_list<T> inputs) {
+        for (auto &i:inputs) *this << i;
     }
     Vect(const T from, const T to, const T inc) {
         assert(from<to && inc!=0);
@@ -374,11 +384,14 @@ public:
     static Vect rnd(size_t size) { // norm random
         assert(size>0);
         Vect v(size);
-        for (auto &d:v) d=(T)rand()/(T)RAND_MAX;
-        /* with mt can't beat single theaded solution
         if (v.size<szSingle)  for (auto &d:v) d=(T)rand()/(T)RAND_MAX;
-        else                  ThreadedCalc(v).rnd(); //, []() -> T{ return (T)rand()/(T)RAND_MAX; });
-         */
+        else                  ThreadedCalc(v).rnd(); 
+        return v;
+    }
+    static Vect strnd(size_t size) { // norm random
+        assert(size>0);
+        Vect v(size);
+        for (auto &d:v) d=(T)rand()/(T)RAND_MAX;
         return v;
     }
     static Vect seq(size_t size) { // 0,1...n-1
@@ -456,13 +469,8 @@ public:
     }
     void random() {
         if (size<szSingle)  for (auto &d:*this) d=(T)rand();
-        else                ThreadedCalc(*this, []() -> T {return (T)rand();});
+        else                ThreadedCalc(*this).rnd(); //, []() -> T {return (T)rand_r(seedp);});
     }
-    void rand01() {
-        if (size<szSingle)  for (auto &d:*this) d=(T)rand()/(T)RAND_MAX;
-        else                ThreadedCalc(*this, []() -> T { return (T)rand()/(T)RAND_MAX; });
-    }
-    
     
     std::pair<T,T>minmax() {
         return ThreadedCalc(*this).minmax();
@@ -491,12 +499,12 @@ public:
         auto min=std::get<0>(mmd), diff=std::get<2>(mmd);
         return (diff) ? ((size<szSingle) ? stnorm(min, diff) : ThreadedCalc(*this).norm(min, diff)) : *this;
     }
-    Vect fill(T value) {
+    Vect& fill(T value) {
         std::fill(begin(), end(), value);
         return *this;
     }
     
-    Vect reverse() {
+    Vect& reverse() {
         for (size_t i=0, j=size-1; i<size/2; i++,j--)
             std::swap<T>(data[i], data[j]);
         return *this;
@@ -521,12 +529,14 @@ public:
     }
     Vect& shuffle() {
         if (size > 1) {
-            for (int i=0; i<size; i++)
-                std::swap<T>(data[i], data[(rand() % (i + 1))]);
+            if (size<szSingle) {
+                for (int i=0; i<size; i++)
+                    std::swap<T>(data[i], data[(rand() % (i + 1))]);
+            } else
+                ThreadedCalc(*this).shuffle();
         }
         return *this;
     }
-   
     
     Vect& apply(Lambda lambda) { // apply labda func -> mutable, usage: v.apply(sin)
         if (size<szSingle) for (auto &d:*this) d=lambda(d);
@@ -538,6 +548,7 @@ public:
         else ThreadedCalc(*this).apply(lambda);
         return *this;
     }
+    
     Vect func(std::function<T()> const& lambda) { // usage: func(funcNoArgs)
         Vect v(*this);
         if (size<szSingle) for (auto &d:v) d=lambda();
@@ -566,8 +577,8 @@ public:
     }
     
     // iterator support
-    T*begin() { _index=0; return data; }
-    T*end() { return data+size; }
+    T*begin()   { _index=0; return data; }
+    T*end()     { return data+size; }
     size_t incIndex() { return _index++; } // for (auto d:vect) v1[vect.incIndex()]=d;
     
     // append
@@ -609,7 +620,7 @@ public:
         return *this;
     }
     Vect& one() {
-        for (auto &d:*this) d=(T)1;
+        fill((T)1);
         return *this;
     }
     T erase(size_t ix) { // return removed item
@@ -640,7 +651,6 @@ public:
         
         if (size != other.size) resize(other.size);
         memcpy(data, other.data, size * sizeof(T));
-//        std::copy(&other.data[0], &other.data[0] + size, &data[0]);
         return *this;
     }
     Vect &operator=(const T c) { // asignment
@@ -800,10 +810,10 @@ public:
         return v;
     }
     
-    Vect& operator||(const Vect &other) { // union?
+    Vect operator||(const Vect &other) { //
         return *this;
     }
-    Vect& operator&&(const Vect &other) {
+    Vect operator&&(const Vect &other) {
         return *this;
     }
     
@@ -957,13 +967,28 @@ public:
     Vect& stdiv(const Vect&v) { for (auto &d:*this) d/=v[_index++]; return *this;}
     Vect& stpow(const Vect&v) { for (auto &d:*this) d=pow(d,v[_index++]); return *this;}
     
-    void rnd() {
+    void strnd() {
         for (auto &d:*this) d=(T)rand()/(T)RAND_MAX;
     }
     Vect stfunc(Lambda lambda) { // non mutable -> return a copy applying func
         Vect v(*this);
         for (auto &d:v) d=lambda(d);
         return v;
+    }
+    Vect& stapply(Lambda lambda) { // apply labda func -> mutable, usage: v.apply(sin)
+        for (auto &d:*this) d=lambda(d);
+        return *this;
+    }
+    Vect& stapply(std::function<T()> const& lambda) { // usage: v.apply(funcNoArgs)
+        for (auto &d:*this) d=lambda();
+        return *this;
+    }
+    Vect& stshuffle() {
+        if (size > 1) {
+            for (int i=0; i<size; i++)
+                std::swap<T>(data[i], data[(rand() % (i + 1))]);
+        }
+        return *this;
     }
 };
 

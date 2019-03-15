@@ -39,28 +39,73 @@ void testVect() {
     real sin(real x), cos(real), tan(real); // required to differenciate float/real versions
     Timer timer;
     
-    VectReal vinit(5, new real[5]{0,1,2,3,4});
     VectReal v0, v1(1000), v2(1000), v5(v1), vxx(0, M_PI, 1e-4), vsin(0, M_PI, 1e-4, sin);
     auto v4=v1;
     puts("ok");
     
-    printf("single vs. multithead sweet point...");
+    
+    printf("shuffle test...");
     {
         long ts, tm;
-        size_t n=1e8;
+        real inc=1e-7;
         
-        printf("for %ld values, now st...", n);
-        timer.start();        auto vs=VectReal::rnd(n);        ts=timer.lap();
+        auto vorg=VectReal(0, 1, inc), vsh=vorg;
+        
+        timer.start(); vsh.stshuffle(); ts=timer.lap();
+        auto vsht=vsh;
+        
+        assert(vsh.sum() == vorg.sum());
+        
+        vorg=VectReal(0, 1, inc); vsh=vorg;
+        timer.start(); vsh.shuffle(); tm=timer.lap();
+        
+        printf("done, st=%ld, mt=%ld, ratio %.1f checking...", ts, tm, 1.*ts/tm);
+        
+        assert(vsh.sum() == vorg.sum());
+        
+        assert( vsh != vorg );
+        for (auto d:vsh)    assert(vorg.bsearch(d)!=-1);
+        
+        vsh.sort();
+        for (auto d:vorg)   assert(vsh.bsearch(d)!=-1);
+        assert(vsh == vorg);
+        
+        vsht.sort();
+        assert(vsht == vorg);
+        
+    }
+    puts("ok");
+    
+    printf("single vs. multithead...");
+    {
+        long ts, tm;
+        size_t n=1e7;
+        
+        // low mt gain when using simple funcs as rand, == , sum
+        printf("for %ld values:\n", n);
+        timer.start();        auto vs=VectReal::strnd(n);      ts=timer.lap();
         timer.start();        auto vm=VectReal::rnd(n);        tm=timer.lap();
-        printf("lap for rnd init st:%ld ms, mt:%ld ms\n", ts, tm);
+        printf("lap for rnd init st:%ld ms, mt:%ld ms, ratio=%.1f\n", ts, tm, 1. * ts/tm);
+        
         vs=vs;
-        timer.start();        bool bs=vs.stEQ(vs);        ts=timer.lap();
-        timer.start();        bool bm=vm==vm;             tm=timer.lap();
-        printf("lap for == worst case init st:%ld ms, mt:%ld ms, (%d,%d)\n", ts, tm, bs, bm);
+        timer.start();        vs.stEQ(vs);        ts=timer.lap();
+        timer.start();        void(vm==vm);       tm=timer.lap();
+        printf("lap for == worst case init st:%ld ms, mt:%ld ms, ratio %.1f\n", ts, tm, 1.*ts/tm);
         
         timer.start();        auto vss=vs.stadd(vs);     ts=timer.lap();
         timer.start();        vss=vs+vm;                 tm=timer.lap();
-        printf("lap for v+v worst case init st:%ld ms, mt:%ld ms, (%d,%d)\n", ts, tm, bs, bm);
+        printf("lap for v+v worst case init st:%ld ms, mt:%ld ms, ratio: %.1f\n", ts, tm, 1.*ts/tm);
+        
+        // this starts better mt performnace
+        timer.start();        auto vs1=vs.stfunc(sin);     ts=timer.lap();
+        timer.start();        vs1=vs.apply(sin);           tm=timer.lap();
+        printf("lap for sin st:%ld ms, mt:%ld ms, ratio %.1f\n", ts, tm, 1.*ts/tm);
+        
+        // the more complex func to apply the bugger st/mt ratio
+        auto cmplxFunc=[](double x) -> double { return sin(x*x)+cos(x*2)+tan(pow(x,3)+log(1+abs(x))+exp(x/3.9)); };
+        timer.start();        vs1=vs.stfunc(cmplxFunc);     ts=timer.lap();
+        timer.start();        vs1=vs.apply(cmplxFunc);           tm=timer.lap();
+        printf("lap for complex trigs. st:%ld ms, mt:%ld ms, ratio %.1f\n", ts, tm, 1.*ts/tm);
         
     }
     puts("ok");
@@ -175,22 +220,20 @@ void testVect() {
         long ls, lm;
         real inc=1e-8;
         
-        timer.start(); // seq st/mt ratio = 4 for 1e8 values
-        printf("generating data st...");
-        VectReal v=VectReal::stSeq(0, 1, inc);
-        printf("done in %ld ms\n", ls=timer.lap());
+        // seq st/mt ratio = 4 for 1e8 values
+        printf("generating seq...");
+        timer.start();   VectReal v=VectReal::stSeq(0, 1, inc);
+        printf("st in %ld ms, ", ls=timer.lap());
         
-        printf("generating data mt...");
-        timer.start();
-        VectReal vm(0, 1, inc);
-        lm=timer.lap();
-        printf("done in %ld ms, ratio %.1f, ", lm, (double)ls/lm );
+        timer.start();  VectReal vm(0, 1, inc);  lm=timer.lap();
+        printf("mt in %ld ms, ratio %.1f, ", lm, (double)ls/lm );
         auto diff = abs((v - vm).sum());
         printf("error=%e are eq:%d\n", diff, v==vm);
         
-        timer.start();
+        
         printf("locate st...");
-        for (size_t i=v.count()-5; i<v.count(); i++) assert(v.locate(v[i])!=-1);
+        timer.start();
+        for (size_t i=v.count()-5; i<v.count(); i++) assert(v.stlocate(v[i])!=-1);
         printf("done in %ld ms, now in mt...", ls=timer.lap());
         timer.start();
         for (size_t i=v.count()-5; i<v.count(); i++) assert(v.locate(v[i])!=-1);
@@ -254,14 +297,16 @@ void testVect() {
     
     puts("testing init vector, iterator...");
     {
+        VectReal vinit={0,1,2,3,4,3,2,1,0};
         real f;
+        assert(vinit.length() == 9);
         for (auto d:vinit) { // must use iterator to make _inidex=0;
             (void)d; // not used
             vinit >> f;
             cout << f << ",";
         }
-        cout << "ok\n";
     }
+    puts("ok");
     
     printf("testing bsearch...");
     {
@@ -281,10 +326,9 @@ void testVect() {
     
     
     // shuffle
-    cout << "shuffle test...";
-    timer.start();
-    auto vorg=VectReal(0, 1, 1e-4), vsh=vorg;
-    vsh.shuffle();
+    printf("shuffle test...");
+   
+    timer.start();   auto vorg=VectReal(0, 1, 1e-4), vsh=vorg;    vsh.shuffle();
     assert( vsh != vorg );
     for (auto d:vsh)
         assert(vorg.locate(d)!=-1);
@@ -295,8 +339,8 @@ void testVect() {
     cout << "duration: " << timer.lap() << "ms\n";
     
     // multithreading
-    cout << "testing multitheading func...";
-    for (int ic=0; ic<3; ic++) {
+    printf("testing multitheading func...");
+    {
         long t1,t2;
         
         VectReal vmt(0, 1, 1e-7);
@@ -315,13 +359,13 @@ void testVect() {
         timer.start(); // mtSum vs. sum
         auto smt=vff.sum();
         t1=timer.lap();
-        cout << "done in " << t1 << "ms, now st...";
+        printf("done in %ld ms, now st...", t1);
         timer.start();
         vff.stsum();
         t2=timer.lap();
-        cout << "done in " << t2 << "ms ratio= " << t2/t1; // ratio 5
+        printf("done in %ld ms, ratio =%.1f",t2, 1.*t2/t1);
         assert(smt == vff.sum()); //  ok due to kahan sum algo.
-        cout << " ok\n";
+        puts("ok");
     }
     
     {
@@ -334,11 +378,10 @@ void testVect() {
             v0.fit(); // set memory to size
             assert(v0.sum()==rs && "append failure");
         }
-        
         puts("ok");
     }
     
-    cout << "testing erase()...";
+    printf("testing erase()...");
     for (int i=0; i<80; i++) {
         const int ns=2000, nr=900;
         VectReal v = VectReal::seq(ns), v0=VectReal::rnd(nr);
@@ -350,7 +393,7 @@ void testVect() {
         
         assert(v.count()==0 && v0.count()==0);
     }
-    cout << "ok\n";
+    puts("ok");
     
     // test prefix ++, --
     cout << "testing ++, -- ...";
@@ -454,23 +497,22 @@ void testVect() {
     
     // mt vs. st apply -> ratio is 2.5 approx.
     {
+        printf("testing apply in mt vs. st modes, now in MT...");
         
-        
-        puts("testing apply in mt vs. st modes, now in MT...");
-        
+        VectReal v=VectReal(0,1,1e-8), v1=v;
         timer.start(); // mt
-        VectReal v=VectReal(0,1,1e-8, sin);
+        v.apply(sin);
         auto tmt=timer.lap();
         printf("done in %ld ms, now in ST...", tmt);
         
         timer.start(); // st
-        v.apply(sin);
+        v1.stapply(sin);
         auto tst=timer.lap();
-        printf("done in %ld ms, ratio %.1f\n", tst, (double)tst/tmt);
+        printf("done in %ld ms, ratio %.1f\n", tst, 1.0 * tst/tmt);
+        assert(v1==v);
     }
     auto str=v3.toString();
     
     puts("\ntest completed OK\n");
     fflush(stdout);
-    
 }
