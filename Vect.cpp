@@ -45,11 +45,14 @@ void testVect() {
     
     printf("testing csv...");
     {
-        std::string s="1,2,3,4,5,6  ,7,  8, 9,";
+        std::string s="1,2,3,4,5,6  ,7,  8, 9";
         VectReal v;
         v.csv(s);
         assert(v == VectReal(1,10,1));
-        printf("%s", v.toString().c_str());
+
+        v.clear();
+        v.csv(VectReal(1,10,1).toString());
+        assert(v == VectReal(1,10,1));
     }
     puts("ok");
     
