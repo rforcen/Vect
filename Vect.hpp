@@ -15,6 +15,7 @@
 #include <functional>
 #include <sstream>
 #include <thread>
+#include <typeinfo>
 
 
 template <class T>
@@ -156,6 +157,24 @@ public:
                 thds[t] = std::thread([this, t, lambda, &vs]() {
                     for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
                         if(lambda(*d)) vs[t]<<*d;
+                });
+            }
+            joinAll();
+            
+            // join all vs[] in vect
+            for (int t=0; t<nthreads; t++) vres << vs[t];
+            delete[]vs;
+            
+            return vres;
+        }
+        VectIndex& filterIndex(VectIndex& vres, std::function<bool(T)> const& lambda) {
+            VectIndex *vs=new VectIndex[nthreads];
+            
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, lambda, &vs]() {
+                    size_t i=ranges[t];
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++, i++)
+                        if(lambda(*d)) vs[t] << i;
                 });
             }
             joinAll();
@@ -378,7 +397,7 @@ public:
         assert(from<to && inc!=0);
         auto sz=sizeOfRange(from, to, inc);
         alloc(sz);
-        if (sz<szSingle)  for (size_t i=0; i<sz; i++) data[i]=(T)i * inc;
+        if (sz<szSingle)  for (size_t i=0; i<sz; i++) data[i]=from+(T)i * inc;
         else              ThreadedCalc(*this).seq(from, to, inc);
     }
     Vect(T from, T to, T inc, Lambda lambda) {
@@ -457,7 +476,15 @@ private:
         realSize = this->size = size;
     }
     
+    
 public:
+    Vect&csv(std::string s, char delimiter=',') {
+        size_t pos_ant=0;
+        for (size_t pos=0; pos!=std::string::npos; pos_ant=pos ? pos+1:pos, pos=s.find(delimiter, pos+1))
+            if(pos)
+                *this << s.substr(pos_ant, pos-pos_ant);
+        return *this << s.substr(pos_ant, s.length()-pos_ant);
+    }
     std::string toString()  {
         std::ostringstream oss;
         for (auto const d:*this) oss << d << ",";
@@ -555,6 +582,7 @@ public:
         return *this;
     }
     
+    // apply mutable, func non mutable
     Vect& apply(Lambda lambda) { // apply labda func -> mutable, usage: v.apply(sin)
         if (size<szSingle) for (auto &d:*this) d=lambda(d);
         else ThreadedCalc(*this).apply(lambda);
@@ -587,10 +615,12 @@ public:
         else ThreadedCalc(*this).filter(v, lambda);
         return v;
     }
+   
     VectIndex filterIndex(std::function<bool(T)> const& lambda) { // indexes of selected items
         VectIndex res;
-        for (size_t ix=0; ix<size; ix++)
+        if (size<szSingle) {  for (size_t ix=0; ix<size; ix++)
             if (lambda(data[ix])) res<<ix;
+        } else ThreadedCalc(*this).filterIndex(res, lambda);
         return res;
     }
     
@@ -602,6 +632,18 @@ public:
     // append
     Vect& operator << (const T c) {
         return append(c);
+    }
+    Vect& operator << (const std::string sn) {
+        try {
+            switch (*typeid(T).name()) {
+                default:
+                case 'd': *this << std::stod( sn ); break;
+                case 'f': *this << std::stof( sn ); break;
+                case 'i': *this << std::stoi( sn ); break;
+                case 'm': *this << std::stoul( sn ); break;
+            }
+        } catch (...) {}
+        return *this;
     }
     void operator >> (T &c) {
         assert(_index<size);
@@ -657,7 +699,7 @@ public:
     size_t locate(T c) { // use locate on big enough vectors
         return (size < szSingle) ? stlocate(c) : ThreadedCalc(*this).locate(c);
     }
-    size_t bsearch(T c) { //  binary search -> must be sorted, return index if found, -1 if not
+    size_t bsearch(T c) { //  binary search -> this must be sorted, return index if found, -1 if not
         auto ret = std::bsearch(&c, begin(), size, sizeof(T),
                                 [](const void*a, const void*b) ->int { return (int)(*((T*)a) - *((T*)b));});
         return (ret==nullptr) ? -1 : (T*)ret-begin();
@@ -759,15 +801,15 @@ public:
     }
     bool operator>=(const Vect &other) {
         assert(size==other.size);
-        bool gt=true;
-        for (auto d:*this) if(d < other[_index++]) { gt=false; break; }
-        return gt;
+        bool gte=true;
+        for (auto d:*this) if(d < other[_index++]) { gte=false; break; }
+        return gte;
     }
     bool operator<=(const Vect &other) {
         assert(size==other.size);
-        bool lt=true;
-        for (auto d:*this) if(d > other[_index++]) { lt=false; break; }
-        return lt;
+        bool lte=true;
+        for (auto d:*this) if(d > other[_index++]) { lte=false; break; }
+        return lte;
     }
     
     
@@ -1012,6 +1054,12 @@ public:
         Vect v;
         for (auto const d:*this) if (lambda(d)) v<<d;
         return v;
+    }
+    VectIndex stfilterIndex(std::function<bool(T)> const& lambda) { // indexes of selected items
+        VectIndex res;
+        for (size_t ix=0; ix<size; ix++)
+            if (lambda(data[ix])) res<<ix;
+        return res;
     }
 };
 

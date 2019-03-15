@@ -43,21 +43,55 @@ void testVect() {
     auto v4=v1;
     puts("ok");
     
+    printf("testing csv...");
+    {
+        std::string s="1,2,3,4,5,6  ,7,  8, 9,";
+        VectReal v;
+        v.csv(s);
+        assert(v == VectReal(1,10,1));
+        printf("%s", v.toString().c_str());
+    }
+    puts("ok");
+    
     printf("testing filter...");
     {
         long ts, tm;
         real inc=1e-6;
-        auto vorg=VectReal(0, 1, inc), vf=vorg;
+        auto vf=VectReal(0, 1, inc);
         auto ffilter = [](double x){ return (x>0.1 && x<0.3) || (x>0.5 && x<0.7);};
         
         timer.start(); auto vfs=vf.stfilter(ffilter);  ts=timer.lap();
         timer.start(); auto vfm=vf[ffilter];         tm=timer.lap();
         
-        assert(vfs == vfm);
         printf("done, st=%ld, mt=%ld, ratio %.1f checking...", ts, tm, 1.*ts/tm);
+        
+        for (auto d:vfs) assert(ffilter(d));
+        for (auto d:vfm) assert(ffilter(d));
+        
+        assert(vfs == vfm);
     }
     puts("ok");
+    
+    printf("testing filterIndex...");
+    {
+        long ts, tm;
+        real inc=1e-7;
+        auto vf=VectReal(0, 1, inc);
+        auto ffilter = [](double x){ return (x>0.1 && x<0.3) || (x>0.5 && x<0.7);};
         
+        timer.start(); auto vfs=vf.stfilterIndex(ffilter);  ts=timer.lap();
+        timer.start(); auto vfm=vf.filterIndex(ffilter);    tm=timer.lap();
+        
+        printf("done, st=%ld, mt=%ld, ratio %.1f checking...", ts, tm, 1.*ts/tm);
+        
+        for (auto d:vfs) assert(ffilter(vf[d]));
+        for (auto d:vfm) assert(ffilter(vf[d]));
+        
+        assert(vfs == vfm);
+        assert(vf[vfs] == vf[vfm]);
+    }
+    puts("ok");
+    
     
     printf("shuffle test...");
     {
