@@ -149,6 +149,23 @@ public:
             joinAll();
             return *vect;
         }
+        Vect& filter(Vect&vres, std::function<bool(T)> const& lambda) {
+            Vect *vs=new Vect[nthreads];
+            
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, lambda, &vs]() {
+                    for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
+                        if(lambda(*d)) vs[t]<<*d;
+                });
+            }
+            joinAll();
+            
+            // join all vs[] in vect
+            for (int t=0; t<nthreads; t++) vres << vs[t];
+            delete[]vs;
+            
+            return vres;
+        }
         Vect evaluate(const Vect &other, Operator op) { //  ratio 1.2 improvement w/8 threads
             assert(vect->size==other.size);
             Vect v(other.size);
@@ -566,7 +583,8 @@ public:
     
     Vect filter(std::function<bool(T)> const& lambda) { // filter by bool lambda conditional expr.
         Vect v;
-        for (auto const d:*this) if (lambda(d)) v<<d;
+        if (size<szSingle) { for (auto const d:*this) if (lambda(d)) v<<d; }
+        else ThreadedCalc(*this).filter(v, lambda);
         return v;
     }
     VectIndex filterIndex(std::function<bool(T)> const& lambda) { // indexes of selected items
@@ -680,8 +698,8 @@ public:
     }
     Vect operator[](std::function<bool(T)> const& lambda) { // index vect by vector of indexes
         Vect v;
-        for (auto d : *this)
-            if (lambda(d)) v << d;
+        if(size<szSingle) { for (auto d : *this) if (lambda(d)) v << d; }
+        else ThreadedCalc(*this).filter(v, lambda);
         return v;
     }
     Vect operator()(size_t from, size_t to) { // sub vector
@@ -989,6 +1007,11 @@ public:
                 std::swap<T>(data[i], data[(rand() % (i + 1))]);
         }
         return *this;
+    }
+    Vect stfilter(std::function<bool(T)> const& lambda) { // filter by bool lambda conditional expr.
+        Vect v;
+        for (auto const d:*this) if (lambda(d)) v<<d;
+        return v;
     }
 };
 

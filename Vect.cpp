@@ -43,6 +43,21 @@ void testVect() {
     auto v4=v1;
     puts("ok");
     
+    printf("testing filter...");
+    {
+        long ts, tm;
+        real inc=1e-6;
+        auto vorg=VectReal(0, 1, inc), vf=vorg;
+        auto ffilter = [](double x){ return (x>0.1 && x<0.3) || (x>0.5 && x<0.7);};
+        
+        timer.start(); auto vfs=vf.stfilter(ffilter);  ts=timer.lap();
+        timer.start(); auto vfm=vf[ffilter];         tm=timer.lap();
+        
+        assert(vfs == vfm);
+        printf("done, st=%ld, mt=%ld, ratio %.1f checking...", ts, tm, 1.*ts/tm);
+    }
+    puts("ok");
+        
     
     printf("shuffle test...");
     {
