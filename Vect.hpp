@@ -618,8 +618,9 @@ public:
    
     VectIndex filterIndex(std::function<bool(T)> const& lambda) { // indexes of selected items
         VectIndex res;
-        if (size<szSingle) {  for (size_t ix=0; ix<size; ix++)
-            if (lambda(data[ix])) res<<ix;
+        if (size<szSingle) {
+            for (size_t ix=0; ix<size; ix++)
+                if (lambda(data[ix])) res<<ix;
         } else ThreadedCalc(*this).filterIndex(res, lambda);
         return res;
     }

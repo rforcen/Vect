@@ -26,6 +26,11 @@ public:
         std::chrono::duration<double, std::milli> time_span = end - begin;
         return (long)time_span.count();
     }
+    long chrono(std::function<void(void)>const& lambda) {
+        start();
+        lambda();
+        return lap();
+    }
 };
 
 void testVect() {
@@ -44,17 +49,18 @@ void testVect() {
     puts("ok");
     
     printf("testing csv...");
+    auto t=timer.chrono([]()
     {
         std::string s="1,2,3,4,5,6  ,7,  8, 9";
-        VectReal v;
-        v.csv(s);
+        auto v=VectReal().csv(s);
+        
         assert(v == VectReal(1,10,1));
 
         v.clear();
         v.csv(VectReal(1,10,1).toString());
         assert(v == VectReal(1,10,1));
-    }
-    puts("ok");
+    });
+    printf("%ld ms, ok\n", t);
     
     printf("testing filter...");
     {
@@ -85,13 +91,17 @@ void testVect() {
         timer.start(); auto vfs=vf.stfilterIndex(ffilter);  ts=timer.lap();
         timer.start(); auto vfm=vf.filterIndex(ffilter);    tm=timer.lap();
         
+        auto vfd=vf[ffilter]; // filter [] operator
+        
         printf("done, st=%ld, mt=%ld, ratio %.1f checking...", ts, tm, 1.*ts/tm);
         
         for (auto d:vfs) assert(ffilter(vf[d]));
         for (auto d:vfm) assert(ffilter(vf[d]));
+        for (auto d:vfd) assert(ffilter(d));
         
         assert(vfs == vfm);
         assert(vf[vfs] == vf[vfm]);
+        assert(vfs.count() == vfd.count());
     }
     puts("ok");
     
@@ -480,15 +490,15 @@ void testVect() {
         assert( v[fsel] == v[v.filterIndex(fsel)] ); // index by lambda
         
     }
-    cout << "ok\n";
+    puts("ok");
     
     // aritmethic
-    cout << "testing random, algebra...";
+    printf("testing random, algebra...");
     v1.random(); v2.random(); v4.random();
     v0 = (v1+v2/v4)*3;
-    cout << "ok\n";
+    puts("ok");
     
-    cout << "testing ::rnd, <<, sum, logical ops., iterators, filter, reverse, sub, genWave, apply...";
+    printf("testing ::rnd, <<, sum, logical ops., iterators, filter, reverse, sub, genWave, apply...");
     v0.clear(); // vect append
     
     auto v01=VectReal::rnd(40000), v02=VectReal::rnd(5000);
@@ -496,7 +506,7 @@ void testVect() {
     v0 << v02;
     
     // for bigger v01, v02 sizes precission real may just not enough
-    cout << "error =" << fabs(v0.sum() - (v01.sum()+v02.sum())) << "\n";
+    printf("error =%.1f\n", fabs(v0.sum() - (v01.sum()+v02.sum())) );
     assert(fabs(v0.sum() - (v01.sum()+v02.sum())) < 1e-8);
     
     
