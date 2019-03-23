@@ -18,6 +18,8 @@
 #include <typeinfo>
 
 
+//#define NDEBUG // full speed w/out checkings
+
 template <class T>
 class Vect {
 public:
@@ -562,7 +564,7 @@ public:
     
     Vect& sort(bool increasing=true) {
         if (increasing)
-            std::sort(begin(), end(), [](T a, T b){ return a<b; });
+            std::sort(begin(), end()); // , [](T a, T b){ return a<b; });
         else
             std::sort(begin(), end(), [](T a, T b){ return b<a; });
         return *this;

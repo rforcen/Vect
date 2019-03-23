@@ -8,30 +8,9 @@
 #include "Vect.hpp"
 #include <math.h>
 #include <iostream>
-
-#include <ctime>
-#include <chrono>
-#include <ratio>
+#include "Timer.h"
 
 using std::cout;
-
-class Timer {
-    std::chrono::high_resolution_clock::time_point begin, end;
-public:
-    void start() {
-        begin = std::chrono::high_resolution_clock::now();
-    }
-    long lap() {
-        end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> time_span = end - begin;
-        return (long)time_span.count();
-    }
-    long chrono(std::function<void(void)>const& lambda) {
-        start();
-        lambda();
-        return lap();
-    }
-};
 
 void testVect() {
     puts("test started\n");
@@ -48,8 +27,17 @@ void testVect() {
     auto v4=v1;
     puts("ok");
     
-    printf("testing csv...");
-    auto t=timer.chrono([]()
+    timer.chrono("testing sum s/m...\n",[]()
+     {
+         auto v=VectReal::rnd(1e8);
+         auto ss=0.0, sm=0.0;
+         auto ts=Timer().chrono("st...", [&v, &ss](){ ss = v.stsum();  });
+         auto tm=Timer().chrono("mt...", [&v, &sm](){ sm = v.sum();  });
+         printf("done, st=%ld, mt=%ld, ratio %.1f\n", ts, tm, 1.*ts/tm);
+         assert(ss=sm);
+     });
+    
+    auto t=timer.chrono("testing csv...",[]()
     {
         std::string s="1,2,3,4,5,6  ,7,  8, 9";
         auto v=VectReal().csv(s);
