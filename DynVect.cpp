@@ -18,7 +18,7 @@
 
 void testDynVect() {
     
-    size_t n=1e6;
+    size_t n=1e7;
     double x=10.001, err=1e-3;
     auto v=DynVect<double>::rnd(n);
     char lin[100];
@@ -28,30 +28,93 @@ void testDynVect() {
     sprintf(lin, "DynVect test for %ld items\n",n);
     Timer().chrono(lin, [&](){
 
-        Timer().chrono("sort & selection...\n", [&]() { // sort
+        Timer().chrono("zero size vectors...\n", [&](){
+            
+            DynVect<double>vv1, vv2;
+            assert(vv1==vv2);
+            vv1+=3;
+            
             DynVect<double>::LambdaBool fbool = [](double x)->bool{return x>0.5 && x<0.6;};
-            auto vsel=v(fbool);
-            assert(v.sort().isSorted());
-            assert(vsel.sort() == vsel.mtsort()); // mtsort experimental!
-            assert(vsel.sort() == v(fbool).mtsort()); // no necessarily equal as order can be different
+            auto vv3=vv1(fbool).sort();
+            vv3+=vv1;
+        });
+                       
+        Timer().chrono("(func)...\n", [&](){
+            DynVect<double>::Lambda _sin=[](double x)->double{ return sin(x); };
+            
+            auto vsel=v( (DynVect<double>::LambdaBool)[](double x)->bool{ return x>=0 && x<=1;} );
+            assert(vsel.count()>0);
+            
+            auto vf=v(_sin);
+            assert(vf==v(_sin));
+            
+            DynVect<double>::LambdaBool fbool = [](double x)->bool{return x>0.5 && x<0.6;};
+            vsel=v(fbool);
+            
+            printf("checking selected items: %ld\n", vsel.count());
+            for (auto d:vsel) assert(fbool(d));
+    
+            printf("comparing sorted items: %ld\n", vsel.count());
+            assert(vsel.sort() == v(fbool).sort()); // no necessarily equal as order can be different
         });
         
-    
+        Timer().chrono("sort & selection...\n", [&]() { // sort
+            DynVect<double>::LambdaBool fbool = [](double x)->bool{return x>0.5 && x<0.6;};
+            puts("selecting...");
+            auto vsel=v(fbool);
+            puts("sorting 1...");
+            assert(v.sort().isSorted());
+            printf("sorting 2, vsel items=%ld...\n", vsel.length());
+            assert(vsel.sort() == vsel.sort()); // mtsort experimental!
+            puts("sorting 3...");
+            assert(vsel.sort() == v(fbool).sort()); // no necessarily equal as order can be different
+        });
+        
+        Timer().chrono("operators...\n", [&]() {
+            // non mutable
+            auto v1=v+v;
+            assert(v1==v+v && v1.sum()==v.sum()*2.);
+            v1=v*v;
+            assert(v1==v*v && v1.sum()==(v*v).sum());
+            v+=1; // avoid zero division
+            printf("(v/v).sum=%f\n", (v/v).sum());
+            assert((v/v+1).sum()==v.length()*2);
+            assert((v-v).sum()==0);
+            
+            // mutable
+            v1=v;
+            v+=v; assert(v==v1*2);
+            v-=v; assert(v==v1*0);
+            v=v1;
+            v/=v; assert(v.sum()==v.length());
+            v*=v; assert(v.sum()==v.length());
+            v=v1;
+            assert(v*2 == v1/0.5);
+            assert(v+2 == v1-(-2));
+        });
+        
         Timer().chrono("sum...\n", [&]() {
-            double sm, ss, sa;
+            double sm, ss;
             auto ts=Timer().chrono("stsum...\n", [&]() {
                 sm=v.stsum();
             });
             auto tm=Timer().chrono("sum...\n", [&]() {
                 ss=v.sum();
             });
-            auto ta=Timer().chrono("accumulate...\n", [&]() {
-                sa=std::accumulate(v.begin(), v.end(), 0.0);
-            });
             
-            printf("(%f - %f = %f) s/m ratio: %.1f  acc:(%f, %ld)\n", sm, ss, abs(sm-ss), 1.*ts/tm, sa, ta);
+            printf("(%f - %f = %f) s/m ratio: %.1f\n", sm, ss, abs(sm-ss), 1.*ts/tm);
             assert(abs(sm-ss) < err);
         });
+        
+        Timer().chrono("accumulate vs. kahan sum...\n", [&]() { // sort
+            auto sa=std::accumulate(v.begin(), v.end(), 0.0);
+            v._reverse();
+            auto ths=DynVect<double>::Thread(&v).sum(), vs=v.sum();
+            printf("diff acc & acc reversed: %g, rec: %g == %g, diff=%g\n", sa-std::accumulate(v.begin(), v.end(), 0.0), vs, ths, abs(vs-ths));
+            printf("diff sum & sum reversed: %g\n", v.sum() - v.reverse().sum());
+        });
+        
+        
         
         Timer().chrono("shuffle...\n", [&]() {
             auto vorg=v;
@@ -81,22 +144,7 @@ void testDynVect() {
         
       
         
-        Timer().chrono("(func)...\n", [&](){
-            DynVect<double>::Lambda _sin=[](double x)->double{ return sin(x); };
-            
-            auto vsel=v((DynVect<double>::LambdaBool)[](double x)->bool{ return x>=0 && x<=1;} );
-            assert(vsel.count()>0);
-            
-            auto vf=v(_sin);
-            assert(vf==v(_sin));
-            
-            DynVect<double>::LambdaBool fbool = [](double x)->bool{return x>0.5 && x<0.6;};
-            vsel=v(fbool);
-            printf("selected items: %ld\n",vsel.count());
-            for (auto d:vsel) assert(fbool(d));
-            
-            assert(vsel.sort() == v(fbool).sort()); // no necessarily equal as order can be different
-        });
+       
         
         Timer().chrono("rnd performance in st/mt...\n", [=](){
             auto ts=Timer().chrono("single thread...",  [n](){ auto v=DynVect<double>::strnd(n); });

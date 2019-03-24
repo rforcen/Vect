@@ -384,7 +384,8 @@ public:
     Vect() { }
     
     Vect(const size_t size) {
-        alloc(size);
+        if(size>0)
+            alloc(size);
     }
     Vect(const Vect &other) { // Vect v0(v1), v2=v1;
         if(other.size>0) {
