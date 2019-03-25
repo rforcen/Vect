@@ -39,9 +39,9 @@ public:
     typedef function<void()>const& LambdaVoid;
     typedef function<bool(T)>const& LambdaBool;
     typedef function<void(size_t, size_t)>const& LambdaRange;
-
+    
     typedef enum { opADD, opSUB, opMUL, opDIV, opPOW } Operator;
-
+    
 private:
     const int nBits=14; // define 2^nBits block size
     const size_t maskIndex=(__SIZE_MAX__<<nBits) ^ __SIZE_MAX__;
@@ -91,7 +91,7 @@ public:
         inline T total() { return s; }
     };
     
-   
+    
     
 public:
     
@@ -178,10 +178,10 @@ public:
     }
     DynVect&_fill(T c) {
         if (size<minsizeMT) stfill(c);
-        else                Thread(this, (Lambda)([c](T) -> T { return c; }));
+        else                Thread(this).fill(c);
         return *this;
     }
-    DynVect fill(T c) {  return DynVect(*this)._fill(c);    }
+    DynVect fill(T c) {  return DynVect(*this)._fill(c);    } // much slower than _mutable version
     
     DynVect generate(Lambda lambda) {
         DynVect v(*this);
@@ -192,161 +192,21 @@ public:
     T stsum() const {
         return kahanSum();
     }
-  
+    
     void debug(size_t n=20) {
         for (auto i=0; i<n; i++)
             printf("%.2f, ", (*this)[i]);
     }
     
-    class Thread {
-    public:
-        static const int maxThreads=256;
-        int nthreads = thread::hardware_concurrency()-1; // std::min<int> ( thread::hardware_concurrency()-1, maxThreads );
-        const DynVect*v=nullptr;
-        mutex mutex;
-        atomic<bool>sw; //=true;
-        atomic<size_t> position; // =-1;
-        size_t segsize=0;
-        thread ths[maxThreads];
-        
-        // in a from, to scenario cal from, to value based in current thread 't' and segsize=size/nthreads
-        inline size_t calcTo(int t)     const { return (t==nthreads-1) ? v->size : (t+1)*segsize; }
-        inline size_t calcFrom(int t)   const { return t*segsize; }
-        
-        Thread(const DynVect*v) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {}
-        
-        Thread(const DynVect*v, LambdaRange lambda) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {
-            for (auto t=0; t<nthreads; t++)
-                ths[t] = thread ( [this, t, lambda] { lambda(calcFrom(t), calcTo(t)); });
-            for (auto t=0; t<nthreads; t++)    ths[t].join();
-        }
-        Thread(const DynVect*v, Lambda lambda) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {
-            for (auto t=0; t<nthreads; t++)
-                ths[t] = thread ( [this, v, t, lambda] {
-                      for (auto i=calcFrom(t); i < calcTo(t); i++) {
-                          T &d=(T&)((*v)[i]);
-                          d=lambda(d);
-                      }
-                  });
-            for (auto t=0; t<nthreads; t++) ths[t].join();
-        }
-        Thread(const DynVect*v, DynVect&other, LambdaBool lambda) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {
-            for (auto t=0; t<nthreads; t++)
-                ths[t] = thread ( [this, t, lambda, v, &other] {
-                      auto vl=DynVect();
-                      for (auto i=calcFrom(t); i < calcTo(t); i++) {
-                          T d=(*v)[i];
-                          if(lambda(d)) vl << d;
-                      }
-                      // lock append th partial result
-                      mutex.lock();  other << vl;   mutex.unlock();
-                  });
-            for (auto t=0; t<nthreads; t++) ths[t].join();
-        }
-        void joinAll() {
-            for (auto t=0; t<nthreads; t++) ths[t].join();
-        }
-        
-        inline T kahanSum(int t) const {
-            return v->kahanSum(calcFrom(t), calcTo(t));
-        }
-        T ret(T val) { return val; }
-        const DynVect *vect() { return v; }
-       
-        T sumthread(int t=0) { // elegant & efficient recursive/multithreaded sum
-            Kahan k;
-            if (t<nthreads) {
-                auto th=thread([&](){   k.add( sumthread(t+1) );   });
-                k.add( kahanSum(t) );
-                th.join();
-            }
-            return k.sum();
-        }
-        T sum(int t=0) { // async version, same performance as thread
-            Kahan k;
-            if (t<nthreads) {
-                auto th=async( launch::async, [this, t] { return sum(t+1); } );
-                k.add( kahanSum(t) + th.get() );
-            }
-            return k.total();
-        }
-        
-        
-        bool eq(const DynVect&other) {
-            sw=true; // eq switch
-
-            for (auto t=0; t<nthreads; t++)
-                ths[t] = thread ( [this, t, other]()  {
-                    for (auto i=t*segsize; i < calcTo(t) && sw; i++)
-                        if ((*v)[i] != other[i]) { sw=false; break; }
-                });
-            joinAll();
-            return sw;
-        }
-        
-        size_t find(const T c) {
-            sw=false; // found switch
-            position=-1; // position
-            
-            for (auto t=0; t<nthreads; t++)
-                ths[t] = thread([this, t, c]()   {
-                    for (auto i=t*segsize; i < calcTo(t) && !sw; i++)
-                        if ((*v)[i] == c) { // found -> break this and all threads
-                            position=i; sw=true;
-                            break;
-                        };
-                });
-            joinAll();
-            return position;
-        }
-        
-        DynVect evaluate(const DynVect &other, Operator op) { //  this->v op= other
-            assert(v->size==other.size);
-            
-            for (int t=0; t<nthreads; t++)
-                ths[t] = std::thread([this, &other, t, op]()   {
-                    DynVect&vm=(DynVect&)*v; // create a mutable ref as 'v' is const
-                    switch (op) {
-                        case opADD: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]+=other[i];   break;
-                        case opSUB: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]-=other[i];   break;
-                        case opMUL: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]*=other[i];   break;
-                        case opDIV: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]/=other[i];   break;
-                        case opPOW: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]=pow((*v)[i], other[i]);   break;
-                    }
-                });
-            joinAll();
-            return *v;
-        }
-        DynVect evaluate(T c, Operator op) { //  this->v op= c
-            for (int t=0; t<nthreads; t++)
-                ths[t] = std::thread([this, c, t, op]()   {
-                    DynVect&vm=(DynVect&)*v; // create a mutable ref as 'v' is const
-                    switch (op) {
-                        case opADD: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]+=c;   break;
-                        case opSUB: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]-=c;   break;
-                        case opMUL: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]*=c;   break;
-                        case opDIV: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]/=c;   break;
-                        case opPOW: for (auto i=calcFrom(t); i<calcTo(t); i++)  vm[i]=pow((*v)[i], c);   break;
-                    }
-                });
-            joinAll();
-            return *v;
-        }
-    };
-    
-    T sum() const {
-        return (size<minsizeMT) ? kahanSum() : Thread(this).sum();
-    }
-   
     class Iterator : public iterator<random_access_iterator_tag, T, ptrdiff_t, T*, T&> {
     public:
         
-        DynVect<T>*v=nullptr;
+        DynVect*v=nullptr;
         long index=0;
         
         Iterator() = default;
-        Iterator(DynVect<T>*v) : v(v) {}
-
+        Iterator(DynVect*v) : v(v) {}
+        
         Iterator begin() {
             Iterator it(v);
             it.index=0;
@@ -379,9 +239,171 @@ public:
         inline bool operator <= (const Iterator&other) const { return index<=other.index;   }
         inline bool operator >= (const Iterator&other) const { return index>=other.index;   }
     };
-
     Iterator begin()    { return Iterator(this).begin(); }
     Iterator end()      { return Iterator(this).end();   }
+    
+    
+    class Thread {
+    public:
+        static const int maxThreads=256;
+        int nthreads = thread::hardware_concurrency()-1; // std::min<int> ( thread::hardware_concurrency()-1, maxThreads );
+        const DynVect*v=nullptr;
+        mutex mutex;
+        atomic<bool>sw; //=true;
+        atomic<size_t> position; // =-1;
+        size_t segsize=0;
+        thread ths[maxThreads];
+        
+        // in a from, to scenario cal from, to value based in current thread 't' and segsize=size/nthreads
+        inline size_t begin(int t)   const { return t*segsize; }
+        inline size_t end(int t)     const { return (t==nthreads-1) ? v->size : (t+1)*segsize; }
+        
+        
+        Thread(const DynVect*v) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {}
+        
+        Thread(const DynVect*v, LambdaRange lambda) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {
+            for (auto t=0; t<nthreads; t++)
+                ths[t] = thread ( [this, t, lambda] { lambda(begin(t), end(t)); });
+            joinAll();
+        }
+        Thread(const DynVect*v, Lambda lambda) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {
+            for (auto t=0; t<nthreads; t++)
+                ths[t] = thread ( [this, v, t, lambda] {
+                    auto vv=(DynVect*)v; // override const v
+                    for (auto i=begin(t); i < end(t); i++) {
+                        T &d=(*vv)[i];
+                        d=lambda(d);
+                    }
+                });
+            joinAll();
+        }
+        Thread(const DynVect*v, LambdaNoArg lambda) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {
+            for (auto t=0; t<nthreads; t++)
+                ths[t] = thread ( [this, v, t, lambda] {
+                    auto vv=(DynVect*)v; // override const v
+                    for (auto i=begin(t); i < end(t); i++) {
+                        T &d=(*vv)[i];
+                        d=lambda();
+                    }
+                });
+            joinAll();
+        }
+        Thread(const DynVect*v, DynVect&other, LambdaBool lambda) : v(v), segsize(v->size / nthreads), sw(true), position(-1) {
+            for (auto t=0; t<nthreads; t++)
+                ths[t] = thread ( [this, t, lambda, v, &other] {
+                    auto vl=DynVect();
+                    for (auto i=begin(t); i < end(t); i++) {
+                        T d=(*v)[i];
+                        if(lambda(d)) vl << d;
+                    }
+                    // lock append th partial result
+                    mutex.lock();  other << vl;   mutex.unlock();
+                });
+            joinAll();
+        }
+        void joinAll() {
+            for (auto t=0; t<nthreads; t++) ths[t].join();
+        }
+        
+        inline T kahanSum(int t) const {
+            return v->kahanSum(begin(t), end(t));
+        }
+        T ret(T val) { return val; }
+        const DynVect *vect() { return v; }
+        
+        T sumthread(int t=0) { // elegant & efficient recursive/multithreaded sum
+            Kahan k;
+            if (t<nthreads) {
+                auto th=thread([&](){   k.add( sumthread(t+1) );   });
+                k.add( kahanSum(t) );
+                th.join();
+            }
+            return k.sum();
+        }
+        T sum(int t=0) { // async version, same performance as thread
+            Kahan k;
+            if (t<nthreads) {
+                auto th=async( launch::async, [this, t] { return sum(t+1); } );
+                k.add( kahanSum(t) + th.get() );
+            }
+            return k.total();
+        }
+        
+        
+        bool eq(const DynVect&other) {
+            sw=true; // eq switch
+            
+            for (auto t=0; t<nthreads; t++)
+                ths[t] = thread ( [this, t, other]()  {
+                    for (auto i=begin(t); i < end(t) && sw; i++)
+                        if ((*v)[i] != other[i]) { sw=false; break; }
+                });
+            joinAll();
+            return sw;
+        }
+        
+        size_t find(const T c) {
+            sw=false; // found switch
+            position=-1; // position
+            
+            for (auto t=0; t<nthreads; t++)
+                ths[t] = thread([this, t, c]()   {
+                    for (auto i=begin(t); i < end(t) && !sw; i++)
+                        if ((*v)[i] == c) { // found -> break this and all threads
+                            position=i; sw=true;
+                            break;
+                        };
+                });
+            joinAll();
+            return position;
+        }
+        
+        void fill(T c, int t=0) {
+            if (t<nthreads) {
+                auto th=async( launch::async, [this, t, c] { fill(c, t+1); } );
+                auto vv=(DynVect*)v;
+                for (auto i=begin(t); i<end(t); i++) (*vv)[i] = c;
+                th.get();
+            }
+        }
+        
+        DynVect evaluate(const DynVect &other, Operator op) { //  this->v op= other
+            assert(v->size==other.size);
+            
+            for (int t=0; t<nthreads; t++)
+                ths[t] = std::thread([this, &other, t, op]()   {
+                    DynVect&vm=(DynVect&)*v; // create a mutable ref as 'v' is const
+                    switch (op) {
+                        case opADD: for (auto i=begin(t); i<end(t); i++)  vm[i]+=other[i];   break;
+                        case opSUB: for (auto i=begin(t); i<end(t); i++)  vm[i]-=other[i];   break;
+                        case opMUL: for (auto i=begin(t); i<end(t); i++)  vm[i]*=other[i];   break;
+                        case opDIV: for (auto i=begin(t); i<end(t); i++)  vm[i]/=other[i];   break;
+                        case opPOW: for (auto i=begin(t); i<end(t); i++)  vm[i]=pow((*v)[i], other[i]);   break;
+                    }
+                });
+            joinAll();
+            return *v;
+        }
+        DynVect evaluate(T c, Operator op) { //  this->v op= c
+            for (int t=0; t<nthreads; t++)
+                ths[t] = std::thread([this, c, t, op]()   {
+                    DynVect&vm=(DynVect&)*v; // create a mutable ref as 'v' is const
+                    switch (op) {
+                        case opADD: for (auto i=begin(t); i<end(t); i++)  vm[i]+=c;   break;
+                        case opSUB: for (auto i=begin(t); i<end(t); i++)  vm[i]-=c;   break;
+                        case opMUL: for (auto i=begin(t); i<end(t); i++)  vm[i]*=c;   break;
+                        case opDIV: for (auto i=begin(t); i<end(t); i++)  vm[i]/=c;   break;
+                        case opPOW: for (auto i=begin(t); i<end(t); i++)  vm[i]=pow((*v)[i], c);   break;
+                    }
+                });
+            joinAll();
+            return *v;
+        }
+    };
+    
+    T sum() const {
+        return (size<minsizeMT) ? kahanSum() : Thread(this).sum();
+    }
     
     T parSum(Iterator beg, Iterator end) { // experimental async
         auto len = end - beg;
@@ -390,7 +412,7 @@ public:
         
         Iterator mid = beg + len/2;
         auto handle = async(launch::async,[=]()->T{ return parSum(mid, end); });
-
+        
         return parSum(beg, mid) + handle.get();
     }
     
@@ -457,10 +479,10 @@ public:
     }
     size_t find(const T c) {
         if(size>1) {
-        if (size<minsizeMT) {
-            auto ri = std::find( begin(), end(), c);
-            return ri == end() ? -1 : end()-ri;
-        } else return Thread(this).find(c);
+            if (size<minsizeMT) {
+                auto ri = std::find( begin(), end(), c);
+                return ri == end() ? -1 : end()-ri;
+            } else return Thread(this).find(c);
         } return -1;
     }
     
@@ -484,14 +506,16 @@ public:
     }
     DynVect&_apply(Lambda foo) {
         if(size>1) {
-        if (size<minsizeMT) for (auto &d:*this) d=foo(d);
-        else Thread(this, foo);
+            if (size<minsizeMT) for (auto &d:*this) d=foo(d);
+            else Thread(this, foo);
         }
         return *this;
     }
     DynVect&_apply(LambdaNoArg foo) {
-        if(size>1)
-        for (auto &d:*this) d=foo();
+        if(size>1) {
+            if (size<minsizeMT) for (auto &d:*this) d=foo();
+            else Thread(this, foo);
+        }
         return *this;
     }
     // non mutable
@@ -617,7 +641,7 @@ public:
     DynVect operator*(const T c) const { return operate(c, opMUL); }
     DynVect operator/(const T c) const { return operate(c, opDIV); }
     DynVect operator^(const T c) const { return operate(c, opPOW); }
-
+    
     DynVect operateMutable(const T&c, Operator op) const { // mutable  v <op>= c
         if (size<minsizeMT) {
             switch (op) {
@@ -634,7 +658,7 @@ public:
     DynVect& operator-=(const T c) {  for (Index i=0; i<size; i++) (*this)[i]-=c;    return *this; }
     DynVect& operator*=(const T c) {  for (Index i=0; i<size; i++) (*this)[i]*=c;    return *this; }
     DynVect& operator/=(const T c) {  for (Index i=0; i<size; i++) (*this)[i]/=c;    return *this; }
-
+    
     // operator aritmetic, non mutable
     DynVect operate(const DynVect&other, Operator op) const { // res <op>= o
         assert(size == other.size);

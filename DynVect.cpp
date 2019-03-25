@@ -28,6 +28,24 @@ void testDynVect() {
     sprintf(lin, "DynVect test for %ld items\n",n);
     Timer().chrono(lin, [&](){
 
+        Timer().chrono("apply func...\n", [=](){
+            DynVect<double>v1(n);
+            auto ts=Timer().chrono("single thread...",   [&](){ v1.stapply([n, x] { return x*x; });});
+            auto tm=Timer().chrono("multiple thread...", [&](){ v1._apply ([n, x] { return x*x; });});
+            
+            printf("s/m ratio: %.1f:\n", 1.*ts/tm);
+            assert(v1==x*x);
+        });
+        
+        Timer().chrono("fill...\n", [=](){
+            DynVect<double>v1(n);
+            auto ts=Timer().chrono("single thread...",      [&v1,n,x](){    v1.stfill(x); });  // use mutable faster mode
+            auto tm=Timer().chrono("multiple thread...",    [&v1,n,x](){    v1._fill(x+2); });
+            
+            printf("s/m ratio: %.1f:\n", 1.*ts/tm);
+            assert(v1 == x+2);
+        });
+        
         Timer().chrono("zero size vectors...\n", [&](){
             
             DynVect<double>vv1, vv2;
@@ -51,22 +69,16 @@ void testDynVect() {
             DynVect<double>::LambdaBool fbool = [](double x)->bool{return x>0.5 && x<0.6;};
             vsel=v(fbool);
             
-            printf("checking selected items: %ld\n", vsel.count());
             for (auto d:vsel) assert(fbool(d));
     
-            printf("comparing sorted items: %ld\n", vsel.count());
             assert(vsel.sort() == v(fbool).sort()); // no necessarily equal as order can be different
         });
         
         Timer().chrono("sort & selection...\n", [&]() { // sort
             DynVect<double>::LambdaBool fbool = [](double x)->bool{return x>0.5 && x<0.6;};
-            puts("selecting...");
             auto vsel=v(fbool);
-            puts("sorting 1...");
             assert(v.sort().isSorted());
-            printf("sorting 2, vsel items=%ld...\n", vsel.length());
             assert(vsel.sort() == vsel.sort()); // mtsort experimental!
-            puts("sorting 3...");
             assert(vsel.sort() == v(fbool).sort()); // no necessarily equal as order can be different
         });
         
@@ -152,15 +164,7 @@ void testDynVect() {
             printf("s/m ratio: %.1f:\n", 1.*ts/tm);
         });
         
-        Timer().chrono("fill...\n", [=](){
-            DynVect<double>v1(n);
-            auto ts=Timer().chrono("single thread...",  [&v1,n,x](){ v1.stfill(x); });
-            auto tm=Timer().chrono("multiple thread...",  [&v1,n,x](){ v1=v1.fill(x+2); });
-            
-            printf("s/m ratio: %.1f:\n", 1.*ts/tm);
-            assert(v1==x+2);
-        });
-        
+   
         
         Timer().chrono("sum performance in st/mt...\n", [n,x](){
             auto v=DynVect<double>::rnd(n);
@@ -178,14 +182,6 @@ void testDynVect() {
             printf("s/m ratio: %.1f:\n", 1.*ts/tm);
         });
         
-        Timer().chrono("apply func...\n", [=](){
-            DynVect<double>v1(n);
-            auto ts=Timer().chrono("single thread...",  [&](){ v1.stapply([n, x]() -> double { return x; });});
-            auto tm=Timer().chrono("multiple thread...", [&](){ v1=v1.apply([n, x]() -> double { return x*x; });});
-            
-            printf("s/m ratio: %.1f:\n", 1.*ts/tm);
-            assert(v1==x*x);
-        });
         
         Timer().chrono("iterator vs. index\n", [=](){
             
