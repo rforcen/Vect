@@ -1,0 +1,34 @@
+-(float*)multMatrix {
+
+_arrayA=(float*)calloc(rowsA*columnsA, sizeof(float));
+_arrayB=(float*)calloc(rowsB*columnsB, sizeof(float));
+_arrayC=(float*)calloc(rowsC*columnsC, sizeof(float));
+
+// fill arrays
+for (int i=0; i<rowsA*columnsA; i++) _arrayA[i]=(float)random() / RAND_MAX;
+for (int i=0; i<rowsB*columnsB; i++) _arrayB[i]=(float)random() / RAND_MAX;
+for (int i=0; i<rowsC*columnsC; i++) _arrayC[i]=0.0; // result
+
+_descA=[MPSMatrixDescriptor matrixDescriptorWithDimensions: rowsA columns:columnsA rowBytes:columnsA*sizeof(float) dataType:MPSDataTypeFloat32];
+_descB=[MPSMatrixDescriptor matrixDescriptorWithDimensions: rowsB columns:columnsB rowBytes:columnsB*sizeof(float) dataType:MPSDataTypeFloat32];
+_descC=[MPSMatrixDescriptor matrixDescriptorWithDimensions: rowsC columns:columnsC rowBytes:columnsB*sizeof(float) dataType:MPSDataTypeFloat32];
+
+id<MTLBuffer> bufferA=[_device newBufferWithBytes:_arrayA length:rowsA*columnsA*sizeof(float) options:MTLResourceOptionCPUCacheModeDefault ];
+id<MTLBuffer> bufferB=[_device newBufferWithBytes:_arrayB length:rowsB*columnsB*sizeof(float) options:MTLResourceOptionCPUCacheModeDefault];
+id<MTLBuffer> bufferC=[_device newBufferWithBytes:_arrayC length:rowsC*columnsC*sizeof(float) options:MTLResourceOptionCPUCacheModeDefault];
+
+_matrixA = [[MPSMatrix alloc] initWithBuffer: bufferA descriptor:_descA];
+_matrixB = [[MPSMatrix alloc] initWithBuffer: bufferB descriptor:_descB];
+_matrixC = [[MPSMatrix alloc] initWithBuffer: bufferC descriptor:_descC];
+
+
+id<MTLCommandBuffer>commandBuffer = [_commandQueue commandBuffer];
+[_matrixMultiplication encodeToCommandBuffer:commandBuffer
+leftMatrix:_matrixA
+rightMatrix:_matrixB
+resultMatrix:_matrixC];
+[commandBuffer commit];
+[commandBuffer waitUntilCompleted];
+
+return (float*)[_matrixC.data contents];
+}
