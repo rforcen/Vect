@@ -1,0 +1,2 @@
+some raw testing of metal vs. cpu multithreaded matrix multiplication, 
+performance gain can reach to x 40 in 3000x3000 matrix sizes
