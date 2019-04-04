@@ -10,15 +10,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <algorithm>
 #include <string>
 #include <functional>
 #include <sstream>
 #include <thread>
 #include <typeinfo>
+#include <algorithm>
 
-
-//#define NDEBUG // full speed w/out checkings
+#define NDEBUG // full speed w/out checkings
 
 template <class T>
 class Vect {
@@ -147,6 +146,15 @@ public:
                     unsigned int seedp;
                     for (auto d=vect->data+ranges[t], end=vect->data+ranges[t+1]; d<end; d++)
                         *d = (T)rand_r(&seedp) / (T)RAND_MAX; // use reentrant version of rand
+                });
+            }
+            joinAll();
+            return *vect;
+        }
+        Vect& fill(T value) {
+            for (int t=0; t<nthreads; t++) {
+                thds[t] = std::thread([this, t, value]() {
+                    std::fill(vect->begin()+ranges[t], vect->begin()+ranges[t+1], value);
                 });
             }
             joinAll();
@@ -345,6 +353,24 @@ public:
             return *vect;
         }
         
+        Vect matrixMult(const Vect&b) {
+            Vect c(b.cols, vect->rows);
+            
+            for (int t=0; t<nthreads; t++)
+                thds[t] = std::thread([this, &b, &c, t]()   {
+                    size_t segsize=vect->rows/nthreads;
+                    for (size_t i=segsize*t; i< ((t!=nthreads-1) ? segsize*(t+1) : vect->rows); i++)
+                        for (size_t j=0; j<b.cols; j++) {
+                            T s=0;
+                            for (size_t k=0; k<vect->cols; k++) // sum( aik*bkj )
+                                s+=(*vect)(i, k) * b(k, j);
+                            c(i, j) = s; // cij=s
+                        }
+                });
+            joinAll();
+            return c;
+        }
+        
         ~ThreadedCalc() {
             if(ranges!=nullptr) {
                 delete[] thds;
@@ -363,6 +389,7 @@ private:
     
     T *data=nullptr;
     size_t size=0;
+    size_t cols=0, rows=0;
     size_t _index=0; // used in iterator
     
     static T kahanSum(const T *v, size_t from, size_t to) { // sum vector range usign kahan algorithm
@@ -384,6 +411,10 @@ public:
     Vect() { }
     
     Vect(const size_t size) {
+        if(size>0)
+            alloc(size);
+    }
+    Vect(const size_t cols, const size_t rows) : cols(cols), rows(rows), size(cols*rows) {
         if(size>0)
             alloc(size);
     }
@@ -425,6 +456,14 @@ public:
         Vect v(size);
         if (v.size<szSingle)  for (auto &d:v) d=(T)rand()/(T)RAND_MAX;
         else                  ThreadedCalc(v).rnd(); 
+        return v;
+    }
+    static Vect rnd(size_t cols, size_t rows) { // norm random, matrix mode
+        auto size=rows*cols;
+        assert(size>0);
+        Vect v(cols, rows);
+        if (v.size<szSingle)  for (auto &d:v) d=(T)rand()/(T)RAND_MAX;
+        else                  ThreadedCalc(v).rnd();
         return v;
     }
     static Vect strnd(size_t size) { // norm random
@@ -481,6 +520,37 @@ private:
     
     
 public:
+    T*getData() { return data; }
+    void setData(void*data) { memcpy(this->data, data, sizeBytes());  }
+    size_t sizeBytes() { return size * sizeof(T); }
+    size_t rowBytes() { return rows * sizeof(T); }
+    size_t colBytes() { return cols * sizeof(T); }
+    size_t getCols() { return cols; }
+    size_t getRows() { return rows; }
+    
+    inline const T&operator()(size_t row, size_t col) const {   return (*this)[row * cols + col];    }
+    inline T&operator()(size_t row, size_t col)  {   return (*this)[row * cols + col];    }
+    
+    Vect stmatrixMult(const Vect&b) const {
+        assert(this->cols==b.rows);
+        Vect c(b.cols, rows);
+        
+        for (size_t i=0; i<rows; i++)
+            for (size_t j=0; j<b.cols; j++) {
+                T s=0;
+                for (size_t k=0; k<cols; k++) // sum( aik*bkj )
+                    s+=(*this)(i, k) * b(k, j);
+                c(i, j) = s; // cij=s
+            }
+        
+        return c;
+    }
+    Vect matrixMult(const Vect&b)  {
+        assert(this->cols==b.rows);
+        
+        return (size<50) ? stmatrixMult(b) : ThreadedCalc(*this).matrixMult(b);
+    }
+    
     Vect&csv(std::string s, char delimiter=',') {
         size_t pos_ant=0;
         for (size_t pos=0; pos!=std::string::npos; pos_ant=pos ? pos+1:pos, pos=s.find(delimiter, pos+1))
@@ -547,7 +617,8 @@ public:
         return (diff) ? ((size<szSingle) ? stnorm(min, diff) : ThreadedCalc(*this).norm(min, diff)) : *this;
     }
     Vect& fill(T value) {
-        std::fill(begin(), end(), value);
+        if(size<szSingle)  std::fill(begin(), end(), value); // faster than foreach
+        else ThreadedCalc(*this).fill(value);
         return *this;
     }
     
@@ -629,8 +700,8 @@ public:
     }
     
     // iterator support
-    T*begin()   { _index=0; return data; }
-    T*end()     { return data+size; }
+    inline T*begin()   { _index=0; return data; }
+    inline T*end()     { return data+size; }
     size_t incIndex() { return _index++; } // for (auto d:vect) v1[vect.incIndex()]=d;
     
     // append
@@ -718,7 +789,7 @@ public:
         return *this;
     }
     Vect &operator=(const T c) { // asignment
-        std::fill(begin(), end(), c); //  for (auto &d:*this) d=c;
+        fill(c); //  for (auto &d:*this) d=c;
         return *this;
     }
     
@@ -748,9 +819,9 @@ public:
         else ThreadedCalc(*this).filter(v, lambda);
         return v;
     }
-    Vect operator()(size_t from, size_t to) { // sub vector
-        return sub(from, to);
-    }
+//    Vect operator()(size_t from, size_t to) { // sub vector
+//        return sub(from, to);
+//    }
     
     // boolean,
     bool operator==(const Vect &other) { // vect==vect

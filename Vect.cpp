@@ -15,7 +15,6 @@ using std::cout;
 void testVect() {
     puts("test started\n");
     
-   
     
     printf("testing creators...");
     typedef double real;
@@ -27,8 +26,15 @@ void testVect() {
     auto v4=v1;
     puts("ok");
     
-    timer.chrono("testing sum s/m...\n",[]()
-     {
+    timer.chrono("testing fill...\n",[]() {
+        auto v=VectReal::rnd(1e8);
+        double value=123.456;
+        v=value;
+        assert(v==value);
+    });
+    
+    
+    timer.chrono("testing sum s/m...\n",[]() {
          auto v=VectReal::rnd(1e8);
          auto ss=0.0, sm=0.0;
          auto ts=Timer().chrono("st...", [&v, &ss](){ ss = v.stsum();  });
@@ -37,13 +43,13 @@ void testVect() {
          assert(ss=sm);
      });
     
-    auto t=timer.chrono("testing csv...",[]()
-    {
+    
+    auto t=timer.chrono("testing csv...",[]() {
         std::string s="1,2,3,4,5,6  ,7,  8, 9";
         auto v=VectReal().csv(s);
         
         assert(v == VectReal(1,10,1));
-
+        
         v.clear();
         v.csv(VectReal(1,10,1).toString());
         assert(v == VectReal(1,10,1));
@@ -227,7 +233,7 @@ void testVect() {
         assert((vunion == (v1 << v)) && (vunion.length() == v1.length()));
         auto vinter = v & v1;
         for (auto d:vinter)
-            assert(v.bsearch(d) != -1 && v1.bsearch(d) != -1);
+        assert(v.bsearch(d) != -1 && v1.bsearch(d) != -1);
         
         printf("done for size %.0f in %ld ms\n", n, timer.lap());
     }
@@ -237,7 +243,7 @@ void testVect() {
         size_t n=2000, n1=10000;
         auto v=VectReal::rnd(n1), v1=VectReal::rnd(n), v1tmp=v1, v2=(v1<<v);
         
-        assert(v2(n, n+n1) == v); // sub vector test
+        assert(v2.sub(n, n+n1) == v); // sub vector test
         assert(v2==v1);
         assert(!(v2!=v1));
         assert((v1tmp|v) == v2); // join test |
@@ -377,11 +383,11 @@ void testVect() {
     
     // shuffle
     printf("shuffle test...");
-   
+    
     timer.start();   auto vorg=VectReal(0, 1, 1e-4), vsh=vorg;    vsh.shuffle();
     assert( vsh != vorg );
     for (auto d:vsh)
-        assert(vorg.locate(d)!=-1);
+    assert(vorg.locate(d)!=-1);
     
     cout << "ok, shuffle sum error=" << abs(vorg.sum() - vsh.sum()) << " due to kahan algo.\n";
     cout << " sums: shuffle sum=" << vsh.sum() << " , original sum=" << vorg.sum() << ", kahan sum=" << vsh.sum() << "\n";
@@ -437,9 +443,9 @@ void testVect() {
         VectReal v = VectReal::seq(ns), v0=VectReal::rnd(nr);
         
         for (int j=0; j<ns; j++) // locate is mt and will last longer than st version
-            assert( v.stlocate( v.erase(rand() % v.count()) )==-1 );
+        assert( v.stlocate( v.erase(rand() % v.count()) )==-1 );
         for (int j=0; j<nr; j++)
-            v0.stlocate( v0.erase(rand() % v0.count()) ); // possible dups (random)
+        v0.stlocate( v0.erase(rand() % v0.count()) ); // possible dups (random)
         
         assert(v.count()==0 && v0.count()==0);
     }
@@ -471,7 +477,7 @@ void testVect() {
         assert(v[ixs]==v.filter(fsel));
         
         for (auto ix:ixs)
-            assert(fsel(v[ix]));
+        assert(fsel(v[ix]));
         auto vsel=v[ ixs ]; // index by VectIndex
         
         assert(vsel.filter(fsel)==vsel);
@@ -499,7 +505,7 @@ void testVect() {
     
     
     for (int i=0; i<v1.length(); i++) // test index mutator & accesor. (v2=v1)
-        v2[i] = v1[i];
+    v2[i] = v1[i];
     // logical ops
     assert(v1==v1     && "== failure");
     assert(v1==v2     && "!= failure");
@@ -515,10 +521,10 @@ void testVect() {
     vseq = vseq1 * 0.01;
     
     // subvector (from, to)
-    auto vsub = v0(10,20);
+    auto vsub = v0.sub(10,20);
     assert(vsub.length()==10 && "sub failure");
     for (auto d: vsub)
-        assert(v0.locate(d)>=10);
+    assert(v0.locate(d)>=10);
     
     // filter
     auto fsel = [](real x) -> bool { return x>0.5 && x<0.7; };
