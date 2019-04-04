@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+	<string>acos((1+i)*log(sin(z^3-1)/z))</string>
+	<string>(1+i)*log(sin(z^3-1)/z)</string>
+	<string>(1+i)*sin(z)</string>
+	<string>z + z^2/sin(z^4-1)</string>
+	<string>log(sin(z))</string>
+	<string>cos(z)/(sin(z^4-1)</string>
+	<string>(z^2-1) * (z-2-i)^2 / (z^2+2*i)</string>
+	<string>sin(z)*c(1,2)</string>
+	<string>sin(1/z)</string>
+	<string>sin(z)*sin(1/z)</string>
+	<string>1/sin(1/sin(z))</string>
+	<string>z</string>
+	<string>(z^2+1)/(z^2-1)</string>
+	<string>(z^2+1)/z</string>
+	<string>(z+3)*(z+1)^2</string>
+	<string>(z/2)^2*(z+1-2i)*(z+2+2i)/z^3</string>
+	<string>(z^2)-0.75-(0.2*i)</string>
+</array>
+</plist>
