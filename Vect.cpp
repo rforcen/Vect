@@ -15,7 +15,7 @@
 
 using std::cout;
 
-typedef float real;
+typedef double real;
 typedef Vect<real> VectReal;
 real rsin(real x) { return ::sin(x); } // required to differenciate float/real versions
 real rcos(real x) { return ::cos(x); }
